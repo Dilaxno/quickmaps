@@ -9,6 +9,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Configuration from environment variables
+DEVICE_FINGERPRINTING_ENABLED = os.getenv("DEVICE_FINGERPRINTING_ENABLED", "true").lower() == "true"
+ALLOW_MULTIPLE_DEVICES_PER_USER = os.getenv("ALLOW_MULTIPLE_DEVICES_PER_USER", "false").lower() == "true"
+HIGH_RISK_DEVICE_BLOCKING = os.getenv("HIGH_RISK_DEVICE_BLOCKING", "false").lower() == "true"
+
 @dataclass
 class DeviceFingerprint:
     """Device fingerprint data structure"""
@@ -88,6 +93,16 @@ class DeviceFingerprintManager:
             Registration result
         """
         try:
+            # If device fingerprinting is disabled, return success without doing anything
+            if not DEVICE_FINGERPRINTING_ENABLED:
+                logger.info("Device fingerprinting is disabled, skipping registration")
+                return {
+                    "success": True,
+                    "device_id": device_data.get('device_id', 'disabled'),
+                    "message": "Device fingerprinting disabled",
+                    "risk_score": 0
+                }
+            
             device_id = device_data.get('device_id')
             if not device_id:
                 raise ValueError("Device ID is required")
@@ -96,7 +111,16 @@ class DeviceFingerprintManager:
             if device_id in self._cache:
                 existing = self._cache[device_id]
                 if existing.user_id != user_id and existing.is_active:
-                    raise ValueError(f"Device {device_id} is already registered to another user")
+                    # If multiple devices per user are allowed, just log a warning
+                    if ALLOW_MULTIPLE_DEVICES_PER_USER:
+                        logger.warning(f"Device {device_id} is registered to {existing.user_id} but allowing multiple users per device")
+                    else:
+                        raise ValueError(f"Device {device_id} is already registered to another user")
+            
+            # Check for high-risk devices
+            risk_assessment = device_data.get('risk_assessment', {})
+            if HIGH_RISK_DEVICE_BLOCKING and risk_assessment.get('isHighRisk', False):
+                raise ValueError("Device registration blocked due to high risk assessment")
             
             # Create device fingerprint record
             fingerprint = DeviceFingerprint(
@@ -105,7 +129,7 @@ class DeviceFingerprintManager:
                 visitor_id=device_data.get('fingerprint', {}).get('visitorId', ''),
                 confidence=device_data.get('fingerprint', {}).get('confidence', 0),
                 components=device_data.get('fingerprint', {}).get('components', {}),
-                risk_assessment=device_data.get('risk_assessment', {}),
+                risk_assessment=risk_assessment,
                 registration_timestamp=device_data.get('registration_timestamp', datetime.now().isoformat()),
                 last_seen=datetime.now().isoformat(),
                 ip_address=ip_address,
@@ -146,6 +170,16 @@ class DeviceFingerprintManager:
             Validation result
         """
         try:
+            # If device fingerprinting is disabled, always return valid
+            if not DEVICE_FINGERPRINTING_ENABLED:
+                logger.info("Device fingerprinting is disabled, skipping validation")
+                return {
+                    "valid": True,
+                    "device_id": device_data.get('device_id', 'disabled'),
+                    "message": "Device fingerprinting disabled",
+                    "last_registration": datetime.now().isoformat()
+                }
+            
             device_id = device_data.get('device_id')
             if not device_id:
                 raise ValueError("Device ID is required")
@@ -153,23 +187,41 @@ class DeviceFingerprintManager:
             # Check if device exists
             if device_id not in self._cache:
                 # Device not registered - this could be suspicious
-                logger.warning(f"Unknown device {device_id} attempting to access user {user_id}")
-                return {
-                    "valid": False,
-                    "reason": "device_not_registered",
-                    "message": "Device not recognized. Please sign up from this device first."
-                }
+                if ALLOW_MULTIPLE_DEVICES_PER_USER:
+                    logger.warning(f"Unknown device {device_id} for user {user_id}, but allowing due to configuration")
+                    return {
+                        "valid": True,
+                        "device_id": device_id,
+                        "message": "Device not registered but allowed",
+                        "last_registration": datetime.now().isoformat()
+                    }
+                else:
+                    logger.warning(f"Unknown device {device_id} attempting to access user {user_id}")
+                    return {
+                        "valid": False,
+                        "reason": "device_not_registered",
+                        "message": "Device not recognized. Please sign up from this device first."
+                    }
             
             fingerprint = self._cache[device_id]
             
             # Check if device belongs to the user
             if fingerprint.user_id != user_id:
-                logger.warning(f"Device {device_id} registered to {fingerprint.user_id} but accessed by {user_id}")
-                return {
-                    "valid": False,
-                    "reason": "device_user_mismatch",
-                    "message": "This device is registered to a different user."
-                }
+                if ALLOW_MULTIPLE_DEVICES_PER_USER:
+                    logger.warning(f"Device {device_id} registered to {fingerprint.user_id} but accessed by {user_id}, allowing due to configuration")
+                    return {
+                        "valid": True,
+                        "device_id": device_id,
+                        "message": "Device registered to different user but allowed",
+                        "last_registration": fingerprint.registration_timestamp
+                    }
+                else:
+                    logger.warning(f"Device {device_id} registered to {fingerprint.user_id} but accessed by {user_id}")
+                    return {
+                        "valid": False,
+                        "reason": "device_user_mismatch",
+                        "message": "This device is registered to a different user."
+                    }
             
             # Check if device is active
             if not fingerprint.is_active:
