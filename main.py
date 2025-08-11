@@ -266,7 +266,7 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 # Basic endpoints
 @app.get("/")
 async def root():
-    return FileResponse("static/index.html")
+    return {"message": "Video Transcription API is running", "status": "ok", "version": "1.0.0"}
 
 @app.get("/api/")
 async def api_root():
