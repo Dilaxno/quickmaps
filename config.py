@@ -35,8 +35,8 @@ TEMP_DIR = BASE_DIR / "temp"
 STATIC_DIR = BASE_DIR / "static"
 
 # Whisper Configuration
-WHISPER_MODEL = "base"  # Options: tiny, base, small, medium, large
-WHISPER_DEVICE = "cpu"  # Options: cpu, cuda (if GPU available)
+WHISPER_MODEL = "small"  # Options: tiny, base, small, medium, large
+WHISPER_DEVICE = "cuda"  # Options: cpu, cuda (if GPU available)
 
 # Processing Configuration
 MAX_WORKERS = 2  # Number of concurrent transcription jobs
