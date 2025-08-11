@@ -30,5 +30,4 @@ gtts>=2.3.0
 watchdog>=3.0.0
 email-validator>=2.1.0
 spacy>=3.7.0,<3.8.0
-thinc>=8.3.4,<8.4.0
 blis>=0.7.0,<1.0.0
