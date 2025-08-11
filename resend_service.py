@@ -1,0 +1,821 @@
+import os
+import logging
+from typing import Optional
+import requests
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+class ResendService:
+    """
+    Resend email service for sending password reset emails and other transactional emails.
+    Resend is a modern email API service that provides reliable email delivery.
+    """
+    
+    def __init__(self):
+        # Resend API Configuration
+        self.api_key = os.getenv('RESEND_API_KEY')
+        self.api_url = "https://api.resend.com/emails"
+        
+        # Email Configuration
+        self.from_email = os.getenv('RESEND_FROM_EMAIL', 'noreply@quickmaps.pro')
+        self.from_name = os.getenv('FROM_NAME', 'QuickMaps')
+        self.frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+        
+        # Validate configuration
+        if not self.api_key:
+            logger.warning("Resend API key not configured. Resend service will not be available.")
+    
+    def is_configured(self) -> bool:
+        """Check if Resend service is properly configured"""
+        return bool(self.api_key)
+    
+    def get_password_reset_template(self, reset_url: str) -> str:
+        """Get the HTML template for password reset email"""
+        return f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Reset Your Password - {self.from_name}</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                body {{
+                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    margin: 0;
+                    padding: 0;
+                    background: linear-gradient(135deg, #090040 0%, #200080 100%);
+                    min-height: 100vh;
+                }}
+                .email-wrapper {{
+                    max-width: 600px;
+                    margin: 40px auto;
+                    padding: 20px;
+                }}
+                .container {{
+                    background: white;
+                    border-radius: 16px;
+                    padding: 0;
+                    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+                    overflow: hidden;
+                }}
+                .header {{
+                    background: #090040;
+                    color: white;
+                    text-align: center;
+                    padding: 40px 30px;
+                }}
+                .brand-name {{
+                    font-size: 28px;
+                    font-weight: 700;
+                    color: white;
+                    margin-bottom: 10px;
+                    letter-spacing: -0.5px;
+                }}
+                .tagline {{
+                    font-size: 16px;
+                    color: white;
+                    opacity: 0.9;
+                    margin: 0;
+                    font-weight: 500;
+                }}
+                .content {{
+                    padding: 40px 30px;
+                }}
+                .greeting {{
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: #1f2937;
+                    margin-bottom: 20px;
+                }}
+                .message {{
+                    font-size: 16px;
+                    color: #4b5563;
+                    margin-bottom: 30px;
+                    line-height: 1.7;
+                }}
+                .button-container {{
+                    text-align: center;
+                    margin: 35px 0;
+                }}
+                .button {{
+                    display: inline-block;
+                    background: #090040;
+                    color: white !important;
+                    text-decoration: none;
+                    padding: 16px 32px;
+                    border-radius: 10px;
+                    font-weight: 600;
+                    font-size: 16px;
+                    box-shadow: 0 4px 15px rgba(9, 0, 64, 0.4);
+                    transition: all 0.3s ease;
+                }}
+                .button:hover {{
+                    transform: translateY(-2px);
+                    box-shadow: 0 8px 25px rgba(9, 0, 64, 0.6);
+                }}
+                .warning {{
+                    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+                    border-left: 4px solid #f59e0b;
+                    border-radius: 8px;
+                    padding: 20px;
+                    margin: 25px 0;
+                }}
+                .warning-title {{
+                    font-weight: 600;
+                    color: #92400e;
+                    margin-bottom: 5px;
+                    font-size: 16px;
+                }}
+                .warning-text {{
+                    color: #78350f;
+                    font-size: 14px;
+                    margin: 0;
+                }}
+                .alternative-link {{
+                    background-color: #f8fafc;
+                    border-radius: 8px;
+                    padding: 20px;
+                    margin: 25px 0;
+                }}
+                .alternative-text {{
+                    font-size: 14px;
+                    color: #6b7280;
+                    margin-bottom: 10px;
+                }}
+                .link-text {{
+                    word-break: break-all;
+                    color: #2563eb;
+                    font-size: 13px;
+                    font-family: monospace;
+                    background: #e0e7ff;
+                    padding: 10px;
+                    border-radius: 4px;
+                    margin: 0;
+                }}
+                .footer {{
+                    background-color: #f9fafb;
+                    padding: 30px;
+                    border-top: 1px solid #e5e7eb;
+                    text-align: center;
+                }}
+                .footer-text {{
+                    font-size: 14px;
+                    color: #6b7280;
+                    margin: 5px 0;
+                }}
+                .social-links {{
+                    margin: 20px 0;
+                }}
+                .security-note {{
+                    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+                    border-left: 4px solid #3b82f6;
+                    border-radius: 8px;
+                    padding: 20px;
+                    margin: 25px 0;
+                }}
+                .security-title {{
+                    font-weight: 600;
+                    color: #1e40af;
+                    margin-bottom: 5px;
+                    font-size: 16px;
+                }}
+                .security-text {{
+                    color: #1e3a8a;
+                    font-size: 14px;
+                    margin: 0;
+                }}
+                @media only screen and (max-width: 480px) {{
+                    .email-wrapper {{ padding: 10px; }}
+                    .header {{ padding: 30px 20px; }}
+                    .content {{ padding: 30px 20px; }}
+                    .logo {{ font-size: 28px; }}
+                    .button {{ padding: 14px 24px; font-size: 15px; }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="email-wrapper">
+                <div class="container">
+                    <div class="header">
+                        <div class="brand-name">QuickMaps</div>
+                        <p class="tagline">Transform your learning with AI-powered notes</p>
+                    </div>
+                    
+                    <div class="content">
+                        <div class="greeting">Hi there! 👋</div>
+                        
+                        <div class="message">
+                            <p>We received a request to reset your password for your <strong>QuickMaps</strong> account. No worries - it happens to the best of us!</p>
+                            <p>Click the button below to create a new password and get back to creating amazing notes:</p>
+                        </div>
+                        
+                        <div class="button-container">
+                            <a href="{reset_url}" class="button" style="color: white !important;">Reset My Password</a>
+                        </div>
+                        
+                        <div class="warning">
+                            <div class="warning-title">⏰ Time-Sensitive Link</div>
+                            <p class="warning-text">This reset link will expire in <strong>1 hour</strong> for your security. If it expires, simply request a new one.</p>
+                        </div>
+                        
+                        <div class="security-note">
+                            <div class="security-title">🛡️ Didn't Request This?</div>
+                            <p class="security-text">If you didn't ask for a password reset, you can safely ignore this email. Your account remains secure.</p>
+                        </div>
+                        
+                        <div class="alternative-link">
+                            <p class="alternative-text">Having trouble with the button? Copy and paste this link into your browser:</p>
+                            <p class="link-text">{reset_url}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="footer">
+                        <p class="footer-text">This email was sent by <strong>QuickMaps</strong></p>
+                        <p class="footer-text">Questions? Contact our support team - we're here to help!</p>
+                        <div class="social-links">
+                            <p class="footer-text">🌐 quickmaps.pro | 📧 support@quickmaps.pro</p>
+                        </div>
+                        <p class="footer-text">&copy; {datetime.now().year} QuickMaps. All rights reserved.</p>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+    
+    def get_password_reset_text(self, reset_url: str) -> str:
+        """Get the plain text version for password reset email"""
+        return f"""
+🗺️ QuickMaps - Password Reset Request
+
+Hi there! 👋
+
+We received a request to reset your password for your QuickMaps account. No worries - it happens to the best of us!
+
+🔐 RESET YOUR PASSWORD:
+{reset_url}
+
+⏰ IMPORTANT: This reset link will expire in 1 hour for your security. If it expires, simply request a new one from our website.
+
+🛡️ DIDN'T REQUEST THIS?
+If you didn't ask for a password reset, you can safely ignore this email. Your account remains secure.
+
+📧 NEED HELP?
+Questions? Contact our support team at support@quickmaps.pro - we're here to help!
+
+🌐 Visit us: quickmaps.pro
+
+Best regards,
+The QuickMaps Team
+
+© {datetime.now().year} QuickMaps. All rights reserved.
+Transform your learning with AI-powered notes.
+        """
+    
+    def get_welcome_email_template(self, user_name: str = "there") -> str:
+        """Get the HTML template for welcome email"""
+        return f"""
+        <!DOCTYPE html>
+        <html lang="en">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Welcome to {self.from_name}!</title>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <style>
+                body {{
+                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    line-height: 1.6;
+                    color: #333;
+                    margin: 0;
+                    padding: 0;
+                    background: linear-gradient(135deg, #090040 0%, #200080 100%);
+                    min-height: 100vh;
+                }}
+                .email-wrapper {{
+                    padding: 40px 20px;
+                    min-height: 100vh;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                }}
+                .container {{
+                    max-width: 600px;
+                    background: white;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+                    overflow: hidden;
+                }}
+                .header {{
+                    background: #090040;
+                    color: white;
+                    text-align: center;
+                    padding: 40px 30px;
+                }}
+                .brand-name {{
+                    font-size: 28px;
+                    font-weight: 700;
+                    color: white;
+                    margin-bottom: 10px;
+                    letter-spacing: -0.5px;
+                }}
+                .tagline {{
+                    font-size: 16px;
+                    color: white;
+                    opacity: 0.9;
+                    margin: 0;
+                    font-weight: 500;
+                }}
+                .content {{
+                    padding: 40px 30px;
+                    text-align: center;
+                }}
+                .greeting {{
+                    font-size: 24px;
+                    font-weight: 600;
+                    color: #333;
+                    margin-bottom: 20px;
+                }}
+                .message {{
+                    font-size: 16px;
+                    color: #666;
+                    margin-bottom: 30px;
+                    line-height: 1.7;
+                }}
+                .message p {{
+                    margin-bottom: 15px;
+                }}
+                .button-container {{
+                    margin: 30px 0;
+                }}
+                .button {{
+                    display: inline-block;
+                    background: #090040;
+                    color: white !important;
+                    text-decoration: none;
+                    padding: 16px 32px;
+                    border-radius: 10px;
+                    font-weight: 600;
+                    font-size: 16px;
+                    box-shadow: 0 4px 15px rgba(9, 0, 64, 0.4);
+                    transition: all 0.3s ease;
+                }}
+                .button:hover {{
+                    transform: translateY(-2px);
+                    box-shadow: 0 8px 25px rgba(9, 0, 64, 0.6);
+                }}
+                .features {{
+                    background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+                    border-radius: 15px;
+                    padding: 25px;
+                    margin: 30px 0;
+                    text-align: left;
+                }}
+                .features h3 {{
+                    color: #090040;
+                    font-size: 18px;
+                    font-weight: 600;
+                    margin-bottom: 15px;
+                    text-align: center;
+                }}
+                .feature-list {{
+                    list-style: none;
+                    padding: 0;
+                    margin: 0;
+                }}
+                .feature-list li {{
+                    padding: 8px 0;
+                    color: #555;
+                    font-size: 15px;
+                    display: flex;
+                    align-items: center;
+                }}
+                .feature-list li::before {{
+                    content: "✨";
+                    margin-right: 10px;
+                    font-size: 16px;
+                }}
+                .tips {{
+                    background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+                    border-radius: 15px;
+                    padding: 25px;
+                    margin: 30px 0;
+                    border-left: 4px solid #10b981;
+                }}
+                .tips h3 {{
+                    color: #065f46;
+                    font-size: 18px;
+                    font-weight: 600;
+                    margin-bottom: 15px;
+                }}
+                .tips p {{
+                    color: #047857;
+                    margin-bottom: 10px;
+                    font-size: 15px;
+                }}
+                .footer {{
+                    background: #f8fafc;
+                    padding: 30px;
+                    text-align: center;
+                    border-top: 1px solid #e2e8f0;
+                }}
+                .footer-text {{
+                    color: #64748b;
+                    font-size: 14px;
+                    margin: 5px 0;
+                }}
+                .social-links {{
+                    margin: 20px 0;
+                }}
+                @media (max-width: 600px) {{
+                    .email-wrapper {{
+                        padding: 20px 10px;
+                    }}
+                    .container {{
+                        border-radius: 15px;
+                    }}
+                    .content {{
+                        padding: 30px 20px;
+                    }}
+                    .header {{
+                        padding: 30px 20px;
+                    }}
+                    .greeting {{
+                        font-size: 20px;
+                    }}
+                    .button {{
+                        padding: 14px 28px;
+                        font-size: 15px;
+                    }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="email-wrapper">
+                <div class="container">
+                    <div class="header">
+                        <div class="brand-name">QuickMaps</div>
+                        <p class="tagline">Transform your learning with AI-powered notes</p>
+                    </div>
+                    
+                    <div class="content">
+                        <div class="greeting">Welcome to QuickMaps, {user_name}! 🎉</div>
+                        
+                        <div class="message">
+                            <p>We're thrilled to have you join our community of learners and note-takers!</p>
+                            <p>QuickMaps is designed to help you organize your thoughts, create beautiful notes, and boost your productivity with AI-powered features.</p>
+                            <p><strong>🎉 Great news!</strong> You've been awarded <strong>10 free credits</strong> to get started. Each credit lets you upload videos, PDFs, or create AI-powered content!</p>
+                        </div>
+                        
+                        <div class="button-container">
+                            <a href="{self.frontend_url}" class="button" style="color: white !important;">Start Creating Notes</a>
+                        </div>
+                        
+                        <div class="features">
+                            <h3>🚀 What you can do with QuickMaps:</h3>
+                            <ul class="feature-list">
+                                <li>Create and organize beautiful notes</li>
+                                <li>Use AI-powered features to enhance your content</li>
+                                <li>Collaborate with others on shared projects</li>
+                                <li>Access your notes from anywhere, anytime</li>
+                                <li>Export and share your work easily</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="tips">
+                            <h3>💡 Quick Start Tips:</h3>
+                            <p><strong>1.</strong> Start by creating your first note - it's as simple as clicking "New Note"</p>
+                            <p><strong>2.</strong> Explore our AI features to enhance your content automatically</p>
+                            <p><strong>3.</strong> Organize your notes with tags and folders for easy access</p>
+                            <p><strong>4.</strong> Need help? Our support team is always here to assist you!</p>
+                        </div>
+                        
+                        <div class="message">
+                            <p>Ready to transform the way you take notes? Let's get started!</p>
+                        </div>
+                    </div>
+                    
+                    <div class="footer">
+                        <p class="footer-text">This email was sent by <strong>QuickMaps</strong></p>
+                        <p class="footer-text">Questions? Contact our support team - we're here to help!</p>
+                        <div class="social-links">
+                            <p class="footer-text">🌐 quickmaps.pro | 📧 support@quickmaps.pro</p>
+                        </div>
+                        <p class="footer-text">&copy; {datetime.now().year} QuickMaps. All rights reserved.</p>
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        """
+    
+    def get_welcome_email_text(self, user_name: str = "there") -> str:
+        """Get the plain text version for welcome email"""
+        return f"""
+🎉 Welcome to QuickMaps, {user_name}!
+
+We're thrilled to have you join our community of learners and note-takers!
+
+QuickMaps is designed to help you organize your thoughts, create beautiful notes, and boost your productivity with AI-powered features.
+
+🎉 Great news! You've been awarded 10 FREE CREDITS to get started. Each credit lets you upload videos, PDFs, or create AI-powered content!
+
+🚀 WHAT YOU CAN DO WITH QUICKMAPS:
+✨ Create and organize beautiful notes
+✨ Use AI-powered features to enhance your content  
+✨ Collaborate with others on shared projects
+✨ Access your notes from anywhere, anytime
+✨ Export and share your work easily
+
+💡 QUICK START TIPS:
+1. Start by creating your first note - it's as simple as clicking "New Note"
+2. Explore our AI features to enhance your content automatically
+3. Organize your notes with tags and folders for easy access
+4. Need help? Our support team is always here to assist you!
+
+🌟 GET STARTED:
+Visit: {self.frontend_url}
+
+Ready to transform the way you take notes? Let's get started!
+
+Questions? Contact our support team - we're here to help!
+
+🌐 Visit us: quickmaps.pro
+📧 Email us: support@quickmaps.pro
+
+Best regards,
+The QuickMaps Team
+
+© {datetime.now().year} QuickMaps. All rights reserved.
+Transform your learning with AI-powered notes.
+        """
+
+    async def send_welcome_email(self, email: str, user_name: str = None) -> bool:
+        """Send welcome email to new user"""
+        try:
+            if not self.is_configured():
+                logger.error("Resend service not configured")
+                return False
+            
+            # Extract name from email if not provided
+            if not user_name:
+                user_name = email.split('@')[0].title()
+            
+            html_content = self.get_welcome_email_template(user_name)
+            text_content = self.get_welcome_email_text(user_name)
+            
+            payload = {
+                "from": f"{self.from_name} <{self.from_email}>",
+                "to": [email],
+                "subject": f"Welcome to {self.from_name}! 🎉",
+                "html": html_content,
+                "text": text_content,
+                "tags": [
+                    {
+                        "name": "category",
+                        "value": "welcome"
+                    }
+                ]
+            }
+            
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.post(self.api_url, json=payload, headers=headers)
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                email_id = response_data.get('id', 'unknown')
+                logger.info(f"✅ Welcome email sent successfully to: {email} (ID: {email_id})")
+                return True
+            else:
+                logger.error(f"❌ Failed to send welcome email: {response.status_code} - {response.text}")
+                return False
+                    
+        except Exception as e:
+            logger.error(f"❌ Error sending welcome email: {e}")
+            return False
+    
+    async def send_password_reset_email(self, email: str, reset_token: str) -> bool:
+        """
+        Send password reset email via Resend API
+        
+        Args:
+            email: Recipient email address
+            reset_token: Password reset token
+            
+        Returns:
+            bool: True if email was sent successfully, False otherwise
+        """
+        if not self.is_configured():
+            logger.error("Resend service is not configured")
+            return False
+        
+        try:
+            reset_url = f"{self.frontend_url}/reset-password?token={reset_token}"
+            
+            # Prepare email payload
+            payload = {
+                "from": f"{self.from_name} <{self.from_email}>",
+                "to": [email],
+                "subject": f"Reset Your Password - {self.from_name}",
+                "html": self.get_password_reset_template(reset_url),
+                "text": self.get_password_reset_text(reset_url),
+                "tags": [
+                    {
+                        "name": "category",
+                        "value": "password_reset"
+                    }
+                ]
+            }
+            
+            # Set headers
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # Send email via Resend API
+            response = requests.post(self.api_url, json=payload, headers=headers)
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                email_id = response_data.get('id', 'unknown')
+                logger.info(f"Password reset email sent successfully via Resend to: {email} (ID: {email_id})")
+                return True
+            else:
+                logger.error(f"Resend API error: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to send password reset email via Resend to {email}: {e}")
+            return False
+    
+    async def send_welcome_email(self, email: str, user_name: str = None) -> bool:
+        """
+        Send welcome email to new users
+        
+        Args:
+            email: Recipient email address
+            user_name: User's name (optional)
+            
+        Returns:
+            bool: True if email was sent successfully, False otherwise
+        """
+        if not self.is_configured():
+            logger.error("Resend service is not configured")
+            return False
+        
+        try:
+            greeting = f"Hi {user_name}!" if user_name else "Hi there!"
+            
+            html_content = f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Welcome to {self.from_name}!</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        line-height: 1.6;
+                        color: #333;
+                        margin: 0;
+                        padding: 20px;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    }}
+                    .container {{
+                        max-width: 600px;
+                        margin: 0 auto;
+                        background: white;
+                        border-radius: 16px;
+                        overflow: hidden;
+                        box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+                    }}
+                    .header {{
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white;
+                        text-align: center;
+                        padding: 40px 30px;
+                    }}
+                    .logo {{
+                        font-size: 32px;
+                        font-weight: bold;
+                        margin-bottom: 10px;
+                    }}
+                    .content {{
+                        padding: 40px 30px;
+                    }}
+                    .button {{
+                        display: inline-block;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        color: white !important;
+                        text-decoration: none;
+                        padding: 16px 32px;
+                        border-radius: 10px;
+                        font-weight: 600;
+                        margin: 20px 0;
+                    }}
+                    .footer {{
+                        background-color: #f9fafb;
+                        padding: 30px;
+                        text-align: center;
+                        border-top: 1px solid #e5e7eb;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <div class="logo">🗺️ {self.from_name}</div>
+                        <p>Transform your learning with AI-powered mind maps</p>
+                    </div>
+                    <div class="content">
+                        <h2>{greeting} Welcome to {self.from_name}! 🎉</h2>
+                        <p>We're excited to have you on board! You're now ready to transform your learning experience with our AI-powered mind mapping tools.</p>
+                        <p>Here's what you can do:</p>
+                        <ul>
+                            <li>📹 Upload videos and get instant mind maps</li>
+                            <li>📄 Process PDFs and documents</li>
+                            <li>🎯 Generate interactive quizzes</li>
+                            <li>🔊 Create audio summaries</li>
+                        </ul>
+                        <div style="text-align: center;">
+                            <a href="{self.frontend_url}" class="button">Start Creating Mind Maps</a>
+                        </div>
+                        <p>If you have any questions, don't hesitate to reach out to our support team at support@quickmaps.pro</p>
+                    </div>
+                    <div class="footer">
+                        <p>© {datetime.now().year} {self.from_name}. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+            
+            text_content = f"""
+Welcome to {self.from_name}! 🎉
+
+{greeting}
+
+We're excited to have you on board! You're now ready to transform your learning experience with our AI-powered mind mapping tools.
+
+Here's what you can do:
+- 📹 Upload videos and get instant mind maps
+- 📄 Process PDFs and documents  
+- 🎯 Generate interactive quizzes
+- 🔊 Create audio summaries
+
+Get started: {self.frontend_url}
+
+If you have any questions, don't hesitate to reach out to our support team at support@quickmaps.pro
+
+Best regards,
+The {self.from_name} Team
+
+© {datetime.now().year} {self.from_name}. All rights reserved.
+            """
+            
+            payload = {
+                "from": f"{self.from_name} <{self.from_email}>",
+                "to": [email],
+                "subject": f"Welcome to {self.from_name}! 🎉",
+                "html": html_content,
+                "text": text_content,
+                "tags": [
+                    {
+                        "name": "category",
+                        "value": "welcome"
+                    }
+                ]
+            }
+            
+            headers = {
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.post(self.api_url, json=payload, headers=headers)
+            
+            if response.status_code == 200:
+                response_data = response.json()
+                email_id = response_data.get('id', 'unknown')
+                logger.info(f"Welcome email sent successfully via Resend to: {email} (ID: {email_id})")
+                return True
+            else:
+                logger.error(f"Resend API error for welcome email: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Failed to send welcome email via Resend to {email}: {e}")
+            return False
+
+# Create global instance
+resend_service = ResendService()
