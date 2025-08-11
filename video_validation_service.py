@@ -6,6 +6,7 @@ import os
 import subprocess
 import json
 import logging
+from ffmpeg_config import FFPROBE_EXECUTABLE
 from typing import Dict, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
@@ -54,9 +55,8 @@ class VideoValidationService:
         Returns None if unable to determine duration
         """
         try:
-            # Use ffprobe to get video duration
             cmd = [
-                'ffprobe',
+                FFPROBE_EXECUTABLE,
                 '-v', 'quiet',
                 '-print_format', 'json',
                 '-show_format',

@@ -10,6 +10,7 @@ import logging
 import yt_dlp
 import time
 from config import YTDL_FORMAT
+from ffmpeg_config import FFMPEG_EXECUTABLE
 
 logger = logging.getLogger(__name__)
 
@@ -220,21 +221,21 @@ class YouTubeService:
     def extract_audio(video_path: str, audio_path: str) -> str:
         """
         Extract audio from video file using ffmpeg
-        
+
         Args:
             video_path (str): Path to the input video file
             audio_path (str): Path for the output audio file
-            
+
         Returns:
             str: Path to the extracted audio file
-            
+
         Raises:
             Exception: If audio extraction fails
         """
         try:
             # Use ffmpeg to extract audio
             cmd = [
-                'ffmpeg',
+                FFMPEG_EXECUTABLE,
                 '-i', video_path,
                 '-vn',  # No video
                 '-acodec', 'pcm_s16le',  # PCM 16-bit little-endian
@@ -243,18 +244,19 @@ class YouTubeService:
                 '-y',  # Overwrite output file
                 audio_path
             ]
-            
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            logger.info(f"Audio extracted successfully: {audio_path}")
+
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=120)
+            logger.info(f"Audio extracted successfully to {audio_path}")
             return audio_path
-            
+
         except subprocess.CalledProcessError as e:
             logger.error(f"FFmpeg error: {e.stderr}")
             raise Exception(f"Audio extraction failed: {e.stderr}")
         except FileNotFoundError:
-            raise Exception("FFmpeg not found. Please install FFmpeg and add it to your PATH.")
+            # This error is now less likely due to the FFMPEG_EXECUTABLE config
+            raise Exception(f"FFmpeg not found. Please ensure '{FFMPEG_EXECUTABLE}' is a valid path or in your system's PATH.")
         except Exception as e:
-            raise Exception(f"Audio extraction failed: {str(e)}")
+            raise Exception(f"An unexpected error occurred during audio extraction: {str(e)}")
     
     @staticmethod
     def get_video_info(url: str) -> dict:
