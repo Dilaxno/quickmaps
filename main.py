@@ -294,110 +294,11 @@ async def api_root():
 
 # Video upload endpoint
 @app.post("/upload-video/")
-async def upload_video(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    request: Request = None,
-):
-    """Upload a video file and transcribe it"""
-    
-    # Validate file type
-    file_extension = Path(file.filename).suffix.lower()
-    
-    if file_extension not in SUPPORTED_VIDEO_FORMATS:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Unsupported file format. Allowed formats: {', '.join(SUPPORTED_VIDEO_FORMATS)}"
-        )
-    
-    # Check file size
-    if hasattr(file, 'size') and file.size > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=400,
-            detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)}MB"
-        )
-    
-    # Extract user information from Firebase token
-    user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
-    
-    # Only check if user has credits (don't deduct yet)
-    if user_id and db:
-        from credit_service import CreditAction
-        credit_result = await credit_service.check_credits(
-            user_id=user_id,
-            action=CreditAction.VIDEO_UPLOAD
-        )
-        
-        if not credit_result.has_credits:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Insufficient credits. {credit_result.message}"
-            )
-    
-    # Create job
-    job_id = job_manager.create_job(
-        user_id=user_id,
-        user_email=user_email,
-        user_name=user_name,
-        action_type="VIDEO_UPLOAD"
-    )
-    
-    try:
-        # Save uploaded file temporarily
-        file_path = UPLOAD_DIR / f"{job_id}_{file.filename}"
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-        
-        # Validate video duration based on user's plan
-        if user_id and db:
-            user_plan = video_validation_service.get_user_plan_from_firestore(db, user_id)
-            validation_result = video_validation_service.validate_video_duration(
-                video_path=str(file_path),
-                user_plan=user_plan,
-                user_id=user_id
-            )
-            
-            if not validation_result.is_valid:
-                # Clean up uploaded file
-                if file_path.exists():
-                    file_path.unlink()
-                
-                # Get upgrade suggestion
-                upgrade_suggestion = video_validation_service.get_plan_upgrade_suggestion(
-                    user_plan, validation_result.duration_minutes or 0
-                )
-                
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "message": validation_result.message,
-                        "validation": {
-                            "is_valid": False,
-                            "duration_minutes": validation_result.duration_minutes,
-                            "allowed_minutes": validation_result.allowed_minutes,
-                            "user_plan": validation_result.user_plan,
-                            "upgrade_suggestion": upgrade_suggestion
-                        }
-                    }
-                )
-        
-        # Set job to processing status before starting background task
-        job_manager.update_job_status(job_id, "processing", "Starting video processing...")
-        
-        # Start background transcription
-        background_tasks.add_task(processing_service.process_video_file, job_id, str(file_path), user_id)
-        
-        return {"job_id": job_id, "message": "File uploaded successfully. Transcription started."}
-    
-    except HTTPException:
-        # Re-raise HTTP exceptions (like validation failures)
-        raise
-    except Exception as e:
-        # Clean up file on other errors
-        if file_path.exists():
-            file_path.unlink()
-        job_manager.set_job_error(job_id, str(e))
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+async def upload_video(file: UploadFile = File(...)):
+    """Minimal upload endpoint that accepts a single file and returns success."""
+    contents = await file.read()
+    # process file
+    return {"status": "success"}
 
 # YouTube download endpoint
 @app.post("/download-youtube/")
