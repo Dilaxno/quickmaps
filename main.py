@@ -3697,6 +3697,53 @@ async def validate_reset_token(request: TokenValidationRequest):
         logger.error(f"Token validation error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+# Email verification OTP endpoints
+from email_verification_service import email_verification_service
+
+class SendOtpRequest(BaseModel):
+    email: str
+    name: Optional[str] = None
+
+class VerifyOtpRequest(BaseModel):
+    email: str
+    otp: str
+
+@app.post("/api/auth/send-email-otp")
+async def send_email_otp(req: SendOtpRequest):
+    try:
+        result = email_verification_service.create_and_send(req.email, req.name)
+        if result.get("success"):
+            return {"message": "OTP sent"}
+        if result.get("error") == "RESEND_COOLDOWN":
+            raise HTTPException(status_code=429, detail=result.get("message"))
+        raise HTTPException(status_code=400, detail=result.get("message", "Failed to send OTP"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"send_email_otp error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@app.post("/api/auth/verify-email-otp")
+async def verify_email_otp(req: VerifyOtpRequest):
+    try:
+        result = email_verification_service.verify(req.email, req.otp)
+        if result.get("success"):
+            return {"message": "Email verified"}
+        # Map errors
+        err = result.get("error")
+        if err in ("NOT_REQUESTED", "INVALID_CODE"):
+            raise HTTPException(status_code=400, detail=result.get("message"))
+        if err in ("EXPIRED", "ALREADY_USED"):
+            raise HTTPException(status_code=410, detail=result.get("message"))
+        if err == "TOO_MANY_ATTEMPTS":
+            raise HTTPException(status_code=429, detail=result.get("message"))
+        raise HTTPException(status_code=400, detail=result.get("message", "Verification failed"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"verify_email_otp error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 # User Statistics endpoints
 @app.get("/api/user-statistics/{user_id}")
 async def get_user_statistics(user_id: str, request: Request = None):

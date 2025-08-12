@@ -5,12 +5,8 @@ Handles audio transcription using Whisper model.
 """
 
 import logging
-import torch
 import whisper
-from config import WHISPER_MODEL
-
-# Determine the device for Whisper model
-WHISPER_DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+from config import WHISPER_MODEL, WHISPER_DEVICE
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +20,7 @@ class TranscriptionService:
     def _initialize_model(self):
         """Initialize the Whisper model"""
         try:
-            logger.info(f"Loading Whisper model: {WHISPER_MODEL} on device: {WHISPER_DEVICE}")
+            logger.info(f"Loading Whisper model: {WHISPER_MODEL}")
             self.model = whisper.load_model(WHISPER_MODEL, device=WHISPER_DEVICE)
             logger.info("Whisper model loaded successfully!")
         except Exception as e:
