@@ -196,8 +196,8 @@ logger.info("Credit service initialized")
 
 # Paddle API Configuration
 PADDLE_API_KEY = os.getenv('PADDLE_API_KEY')
-PADDLE_ENVIRONMENT = os.getenv('PADDLE_ENVIRONMENT', 'sandbox')
-PADDLE_BASE_URL = 'https://api.paddle.com' if PADDLE_ENVIRONMENT == 'production' else 'https://sandbox-api.paddle.com'
+PADDLE_ENVIRONMENT = os.getenv('PADDLE_ENVIRONMENT', 'live')
+PADDLE_BASE_URL = 'https://api.paddle.com' if PADDLE_ENVIRONMENT in ['live', 'production'] else 'https://sandbox-api.paddle.com'
 logger.info(f"Paddle API configured for {PADDLE_ENVIRONMENT} environment")
 
 async def cancel_paddle_subscription(subscription_id: str) -> bool:
@@ -291,14 +291,6 @@ async def root():
 @app.get("/api/")
 async def api_root():
     return {"message": "Video Transcription API", "version": "1.0.0"}
-
-# Video upload endpoint
-@app.post("/upload-video/")
-async def upload_video(file: UploadFile = File(...)):
-    """Minimal upload endpoint that accepts a single file and returns success."""
-    contents = await file.read()
-    # process file
-    return {"status": "success"}
 
 # YouTube download endpoint
 @app.post("/download-youtube/")

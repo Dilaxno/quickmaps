@@ -60,8 +60,8 @@ class PaymentService:
         
         # Paddle API configuration
         self.paddle_api_key = os.getenv("PADDLE_API_KEY")
-        self.paddle_environment = os.getenv("PADDLE_ENVIRONMENT", "sandbox")  # sandbox or live
-        self.paddle_base_url = "https://api.paddle.com" if self.paddle_environment == "live" else "https://sandbox-api.paddle.com"
+        self.paddle_environment = os.getenv("PADDLE_ENVIRONMENT", "live")  # live or sandbox
+        self.paddle_base_url = "https://api.paddle.com" if self.paddle_environment in ["live", "production"] else "https://sandbox-api.paddle.com"
         
         # Plan configurations matching the frontend
         self.plan_configs = {
@@ -261,15 +261,15 @@ class PaymentService:
         """Determine billing cycle from Paddle price ID"""
         # Map of known price IDs to billing cycles (from plans.js)
         price_id_mapping = {
-            # Student plan
-            'pri_01k1ngfpxby3z96nq58f5b4rk6': 'monthly',
-            'pri_01k1nh2zjgjpz0kh966rwwhm2g': 'yearly',
-            # Researcher plan
-            'pri_01k1ngh1qkacvh917cgwy9rsrb': 'monthly',
-            'pri_01k1nh4js7573cdkqmn1t5tk8r': 'yearly',
-            # Expert plan
-            'pri_01k1ngjaydkk1dhdzk52jkzt0y': 'monthly',
-            'pri_01k1nhp6d7mw0dkyqsb4a1bbyg': 'yearly'
+            # Student plan (production)
+            'pri_01k2ad2b99sd168ahwst4dsgsm': 'monthly',
+            'pri_01k2ada78rxk3x2wbe4xbz5n92': 'yearly',
+            # Researcher plan (production)
+            'pri_01k2ad4jq1615arg3wm88pf1t0': 'monthly',
+            'pri_01k2adc42dwrsmg09zg4y2rxjz': 'yearly',
+            # Expert plan (production)
+            'pri_01k2ad68ttbkx581anqh57wm4s': 'monthly',
+            'pri_01k2ade8nh1tta3g336vzwa59x': 'yearly'
         }
         
         billing_cycle = price_id_mapping.get(price_id)
