@@ -12,7 +12,7 @@ class PasswordResetService:
         # General Configuration
         self.from_email = os.getenv('FROM_EMAIL', 'noreply@quickmaps.pro')
         self.from_name = os.getenv('FROM_NAME', 'QuickMaps')
-        self.frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+        self.frontend_url = os.getenv('FRONTEND_URL', 'https://quickmaps.pro')
         
         # Initialize Firestore later to avoid initialization order issues
         self.db = None

@@ -246,12 +246,32 @@ credit_service.db = db
 logger.info("Credit service initialized with Firestore client")
 
 # Add CORS middleware
+# Ensure quickmaps.pro origins are explicitly allowed so browsers receive proper CORS headers
+try:
+    configured_origins = CORS_ORIGINS or []
+    if isinstance(configured_origins, str):
+        configured_origins = [configured_origins]
+except Exception:
+    configured_origins = []
+
+extra_origins = [
+    "https://quickmaps.pro",
+    "https://www.quickmaps.pro",
+]
+
+# When credentials are allowed, wildcard "*" is not permitted by browsers.
+# Remove "*" and use explicit origins.
+sanitized_origins = [o for o in configured_origins if o != "*"]
+allowed_origins = sorted(set(sanitized_origins + extra_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=CORS_ORIGINS,
+    allow_origins=allowed_origins if allowed_origins else ["https://quickmaps.pro", "https://www.quickmaps.pro"],
     allow_credentials=True,
-    allow_methods=CORS_METHODS,
-    allow_headers=CORS_HEADERS,
+    allow_methods=CORS_METHODS if CORS_METHODS != ["*"] else ["GET", "POST", "OPTIONS", "PUT", "DELETE", "PATCH"],
+    allow_headers=CORS_HEADERS if CORS_HEADERS != ["*"] else ["Authorization", "Content-Type", "Accept", "X-Requested-With"],
+    expose_headers=["Content-Disposition"],
+    max_age=86400,
 )
 
 # Create directories for uploads and outputs

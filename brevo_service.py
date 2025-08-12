@@ -12,7 +12,7 @@ class BrevoEmailService:
         self.api_key = os.getenv('BREVO_API_KEY')
         self.sender_email = os.getenv('BREVO_SENDER_EMAIL')
         self.sender_name = os.getenv('BREVO_SENDER_NAME', 'QuickMaps')
-        self.frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+        self.frontend_url = os.getenv('FRONTEND_URL', 'https://quickmaps.pro')
         self.base_url = 'https://api.brevo.com/v3'
         
         # Debug logging
@@ -789,6 +789,9 @@ class BrevoEmailService:
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
                 <title>Reset Your Password - QuickMaps</title>
+                <link rel="preconnect" href="https://fonts.googleapis.com">
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
                 <style>
                     body {{
                         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -856,21 +859,23 @@ class BrevoEmailService:
                     }}
                     .button {{
                         display: inline-block;
-                        background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
-                        color: white !important;
+                        background: #ffffff;
+                        color: #090040 !important;
                         text-decoration: none;
                         padding: 18px 36px;
                         border-radius: 12px;
                         font-weight: 700;
                         font-size: 16px;
-                        box-shadow: 0 6px 20px rgba(9, 0, 64, 0.3);
+                        box-shadow: 0 6px 20px rgba(9, 0, 64, 0.15);
                         transition: all 0.3s ease;
                         text-transform: uppercase;
                         letter-spacing: 0.5px;
+                        border: 2px solid #ffffff;
                     }}
                     .button:hover {{
-                        transform: translateY(-3px);
-                        box-shadow: 0 8px 25px rgba(9, 0, 64, 0.4);
+                        transform: translateY(-2px);
+                        box-shadow: 0 8px 25px rgba(9, 0, 64, 0.25);
+                        background: #f8f9fa;
                     }}
                     .warning-box {{
                         background: linear-gradient(135deg, #fff9c4 0%, #fef3c7 100%);
@@ -916,6 +921,10 @@ class BrevoEmailService:
                     .alternative-link a {{
                         color: #090040;
                         font-weight: 600;
+                        text-decoration: none;
+                    }}
+                    .alternative-link a:hover {{
+                        text-decoration: underline;
                     }}
                     .quickmaps-branding {{
                         background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
