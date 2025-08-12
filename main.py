@@ -1548,6 +1548,186 @@ async def delete_bookmark(
         logger.error(f"❌ Error deleting bookmark: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete bookmark: {str(e)}")
 
+# Saved Notes endpoints
+@app.get("/api/saved-notes")
+async def get_saved_notes(
+    limit: int = 100,
+    request: Request = None
+):
+    """Get user's saved notes"""
+    try:
+        # Extract user information
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        logger.info(f"📝 Getting saved notes for user: {user_id}, limit: {limit}")
+        
+        # Validate limit
+        if limit < 1 or limit > 1000:
+            raise HTTPException(status_code=400, detail="Limit must be between 1 and 1000")
+        
+        # Get saved notes from R2 storage
+        notes = r2_storage.get_user_saved_notes(user_id=user_id, limit=limit)
+        
+        logger.info(f"✅ Retrieved {len(notes)} saved notes for user: {user_id}")
+        
+        return {
+            "status": "success",
+            "success": True,
+            "notes": notes,
+            "count": len(notes),
+            "user_id": user_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error retrieving saved notes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve saved notes: {str(e)}")
+
+@app.get("/api/saved-notes/{note_id}")
+async def get_saved_note(
+    note_id: str,
+    request: Request = None
+):
+    """Get a specific saved note"""
+    try:
+        # Extract user information
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        logger.info(f"📝 Getting saved note: {note_id} for user: {user_id}")
+        
+        # Get saved note from R2 storage
+        note = r2_storage.get_saved_note(user_id=user_id, note_id=note_id)
+        
+        if not note:
+            raise HTTPException(status_code=404, detail="Saved note not found")
+        
+        logger.info(f"✅ Retrieved saved note: {note_id}")
+        
+        return {
+            "status": "success",
+            "success": True,
+            "note": note
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error retrieving saved note: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to retrieve saved note: {str(e)}")
+
+@app.post("/api/save-notes-to-r2")
+async def save_notes_to_r2(
+    request: Request = None
+):
+    """Save notes to R2 storage"""
+    try:
+        # Extract user information
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        
+        # Get request body
+        body = await request.json()
+        notes_data = body.get('notes_data')
+        title = body.get('title', 'Untitled Notes')
+        
+        if not notes_data:
+            raise HTTPException(status_code=400, detail="notes_data is required")
+        
+        logger.info(f"💾 Saving notes to R2 for user: {user_id}, title: {title}")
+        
+        # Save notes to R2 storage
+        note_id = r2_storage.save_notes_to_r2(
+            user_id=user_id,
+            notes_data=notes_data,
+            title=title
+        )
+        
+        logger.info(f"✅ Successfully saved notes with ID: {note_id}")
+        
+        return {
+            "status": "success",
+            "success": True,
+            "note_id": note_id,
+            "message": "Notes saved successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error saving notes: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save notes: {str(e)}")
+
+@app.put("/api/saved-notes/{note_id}")
+async def update_saved_note(
+    note_id: str,
+    request: Request = None
+):
+    """Update a saved note"""
+    try:
+        # Extract user information
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        
+        # Get request body
+        body = await request.json()
+        title = body.get('title')
+        notes_data = body.get('notes_data')
+        
+        logger.info(f"✏️ Updating saved note: {note_id} for user: {user_id}")
+        
+        # Update saved note in R2 storage
+        success = r2_storage.update_saved_note(
+            user_id=user_id,
+            note_id=note_id,
+            title=title,
+            notes_data=notes_data
+        )
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Saved note not found or failed to update")
+        
+        logger.info(f"✅ Successfully updated saved note: {note_id}")
+        
+        return {
+            "status": "success",
+            "success": True,
+            "message": "Note updated successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error updating saved note: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update saved note: {str(e)}")
+
+@app.delete("/api/saved-notes/{note_id}")
+async def delete_saved_note(
+    note_id: str,
+    request: Request = None
+):
+    """Delete a saved note"""
+    try:
+        # Extract user information
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        logger.info(f"🗑️ Deleting saved note: {note_id} for user: {user_id}")
+        
+        # Delete saved note from R2 storage
+        success = r2_storage.delete_saved_note(user_id=user_id, note_id=note_id)
+        
+        if success:
+            logger.info(f"✅ Successfully deleted saved note: {note_id}")
+            return {
+                "status": "success",
+                "success": True,
+                "message": "Note deleted successfully"
+            }
+        else:
+            logger.warning(f"⚠️ Saved note not found or failed to delete: {note_id}")
+            raise HTTPException(status_code=404, detail="Saved note not found or failed to delete")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error deleting saved note: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete saved note: {str(e)}")
+
 # Credits and Payment endpoints
 @app.get("/credits/balance")
 async def get_credits_balance(request: Request = None):

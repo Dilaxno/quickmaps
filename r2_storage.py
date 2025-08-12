@@ -582,5 +582,196 @@ class R2StorageService:
             logger.error(f"❌ Failed to delete bookmark: {e}")
             return False
 
+    def save_notes_to_r2(self, user_id: str, notes_data: Dict, title: str = "Untitled Notes") -> Optional[str]:
+        """Save complete notes document to R2 storage"""
+        if not self.enabled:
+            logger.warning("R2 Storage is disabled")
+            return None
+        
+        try:
+            # Generate unique note ID
+            note_id = str(uuid.uuid4())
+            timestamp = datetime.now(timezone.utc).isoformat()
+            
+            # Create note metadata
+            note_metadata = {
+                "note_id": note_id,
+                "user_id": user_id,
+                "title": title,
+                "created_at": timestamp,
+                "updated_at": timestamp,
+                "notes_data": notes_data
+            }
+            
+            # Generate key for saved note
+            key = f"users/{user_id}/saved_notes/{note_id}.json"
+            
+            # Upload to R2
+            self.client.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key=key,
+                Body=json.dumps(note_metadata, indent=2),
+                ContentType='application/json',
+                Metadata={
+                    'user_id': user_id,
+                    'note_id': note_id,
+                    'title': title,
+                    'created_at': timestamp
+                }
+            )
+            
+            logger.info(f"✅ Saved notes to R2: {key}")
+            return note_id
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to save notes to R2: {e}")
+            return None
+
+    def get_user_saved_notes(self, user_id: str, limit: int = 100) -> List[Dict]:
+        """Get all saved notes for a user"""
+        if not self.enabled:
+            logger.warning("R2 Storage is disabled")
+            return []
+        
+        try:
+            notes = []
+            search_prefix = f"users/{user_id}/saved_notes/"
+            
+            paginator = self.client.get_paginator('list_objects_v2')
+            page_iterator = paginator.paginate(
+                Bucket=R2_BUCKET_NAME,
+                Prefix=search_prefix,
+                MaxKeys=limit
+            )
+            
+            for page in page_iterator:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        try:
+                            # Get the note content
+                            response = self.client.get_object(Bucket=R2_BUCKET_NAME, Key=obj['Key'])
+                            content = response['Body'].read().decode('utf-8')
+                            note_data = json.loads(content)
+                            
+                            # Add file metadata
+                            note_data['file_size'] = obj['Size']
+                            note_data['last_modified'] = obj['LastModified'].isoformat()
+                            
+                            notes.append(note_data)
+                            
+                        except Exception as e:
+                            logger.warning(f"Failed to load saved note {obj['Key']}: {e}")
+                            continue
+            
+            # Sort by creation date (newest first)
+            notes.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            
+            logger.info(f"✅ Retrieved {len(notes)} saved notes for user: {user_id}")
+            return notes
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get saved notes: {e}")
+            return []
+
+    def get_saved_note(self, user_id: str, note_id: str) -> Optional[Dict]:
+        """Get a specific saved note"""
+        if not self.enabled:
+            logger.warning("R2 Storage is disabled")
+            return None
+        
+        try:
+            key = f"users/{user_id}/saved_notes/{note_id}.json"
+            
+            response = self.client.get_object(Bucket=R2_BUCKET_NAME, Key=key)
+            content = response['Body'].read().decode('utf-8')
+            note_data = json.loads(content)
+            
+            logger.info(f"✅ Retrieved saved note: {key}")
+            return note_data
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.warning(f"Saved note not found: {key}")
+                return None
+            else:
+                logger.error(f"❌ Failed to get saved note: {e}")
+                return None
+        except Exception as e:
+            logger.error(f"❌ Failed to get saved note: {e}")
+            return None
+
+    def update_saved_note(self, user_id: str, note_id: str, title: Optional[str] = None, notes_data: Optional[Dict] = None) -> bool:
+        """Update a saved note"""
+        if not self.enabled:
+            logger.warning("R2 Storage is disabled")
+            return False
+        
+        try:
+            # First, get the existing note
+            existing_note = self.get_saved_note(user_id, note_id)
+            if not existing_note:
+                logger.warning(f"Saved note not found for update: {note_id}")
+                return False
+            
+            # Update the fields
+            if title is not None:
+                existing_note['title'] = title
+            if notes_data is not None:
+                existing_note['notes_data'] = notes_data
+            
+            # Update timestamp
+            existing_note['updated_at'] = datetime.now(timezone.utc).isoformat()
+            
+            # Save back to R2
+            key = f"users/{user_id}/saved_notes/{note_id}.json"
+            
+            self.client.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key=key,
+                Body=json.dumps(existing_note, indent=2),
+                ContentType='application/json',
+                Metadata={
+                    'user_id': user_id,
+                    'note_id': note_id,
+                    'title': existing_note['title'],
+                    'updated_at': existing_note['updated_at']
+                }
+            )
+            
+            logger.info(f"✅ Updated saved note: {key}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to update saved note: {e}")
+            return False
+
+    def delete_saved_note(self, user_id: str, note_id: str) -> bool:
+        """Delete a saved note"""
+        if not self.enabled:
+            logger.warning("R2 Storage is disabled")
+            return False
+        
+        try:
+            key = f"users/{user_id}/saved_notes/{note_id}.json"
+            
+            # Check if note exists first
+            try:
+                self.client.head_object(Bucket=R2_BUCKET_NAME, Key=key)
+            except ClientError as e:
+                if e.response['Error']['Code'] == '404':
+                    logger.warning(f"Saved note not found for deletion: {key}")
+                    return False
+                else:
+                    raise
+            
+            # Delete the note
+            self.client.delete_object(Bucket=R2_BUCKET_NAME, Key=key)
+            logger.info(f"✅ Deleted saved note: {key}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to delete saved note: {e}")
+            return False
+
 # Global instance
 r2_storage = R2StorageService()
