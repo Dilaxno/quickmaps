@@ -268,8 +268,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins if allowed_origins else ["https://quickmaps.pro", "https://www.quickmaps.pro"],
     allow_credentials=True,
-    allow_methods=CORS_METHODS if CORS_METHODS != ["*"] else ["GET", "POST", "OPTIONS", "PUT", "DELETE", "PATCH"],
-    allow_headers=CORS_HEADERS if CORS_HEADERS != ["*"] else ["Authorization", "Content-Type", "Accept", "X-Requested-With"],
+    allow_methods=["*"] if CORS_METHODS == ["*"] else CORS_METHODS,
+    allow_headers=["*"] if CORS_HEADERS == ["*"] else CORS_HEADERS,
     expose_headers=["Content-Disposition"],
     max_age=86400,
 )
@@ -281,7 +281,10 @@ for directory in [UPLOAD_DIR, OUTPUT_DIR, TEMP_DIR, STATIC_DIR]:
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-
+# Global CORS preflight handler (ensures 200 OK for all OPTIONS requests)
+@app.options("/{rest_of_path:path}")
+async def preflight_handler(rest_of_path: str):
+    return Response(status_code=200)
 
 # Basic endpoints
 @app.get("/")
