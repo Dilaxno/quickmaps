@@ -172,6 +172,13 @@ class ProcessingService:
             url (str): YouTube URL
             user_id (str, optional): User ID for validation and credit tracking
         """
+        logger.info(f"Starting YouTube processing for job {job_id}, URL: {url}, User: {user_id}")
+        
+        # Verify job exists before starting
+        if not job_manager.job_exists(job_id):
+            logger.error(f"Job {job_id} not found at start of YouTube processing")
+            raise Exception(f"Job {job_id} not found")
+        
         try:
             # Determine platform for appropriate messaging
             if 'udemy.com' in url.lower():
@@ -229,7 +236,11 @@ class ProcessingService:
             
         except Exception as e:
             logger.error(f"YouTube processing failed for job {job_id}: {str(e)}")
-            job_manager.set_job_error(job_id, str(e))
+            # Ensure job still exists before setting error
+            if job_manager.job_exists(job_id):
+                job_manager.set_job_error(job_id, str(e))
+            else:
+                logger.error(f"Cannot set error for job {job_id} - job no longer exists")
     
     async def process_pdf_file(self, job_id: str, pdf_path: str, user_id: Optional[str] = None):
         """
