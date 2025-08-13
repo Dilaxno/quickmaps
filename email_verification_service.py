@@ -228,7 +228,7 @@ class EmailVerificationService:
     def create_and_send(self, email: str, name: Optional[str] = None) -> Dict[str, Any]:
         email_key = email.lower()
         if not self.can_resend(email_key):
-            return {"success": False, "error": "RESEND_COOLDOWN", "message": "Please wait before requesting a new code."}
+            return {"success": False, "error": "RESEND_COOLDOWN", "message": "Please wait a moment before requesting another verification email."}
 
         code = self._generate_code()
         expires_at = self._now_utc() + timedelta(minutes=self.expiry_minutes)
@@ -245,7 +245,7 @@ class EmailVerificationService:
 
         sent = self._send_via_brevo(email_key, code, name or email.split('@')[0])
         if not sent:
-            return {"success": False, "error": "EMAIL_FAILED", "message": "Failed to send verification email"}
+            return {"success": False, "error": "EMAIL_FAILED", "message": "We couldn't send your verification email. Please check your email address and try again."}
         return {"success": True}
 
     def verify(self, email: str, code: str) -> Dict[str, Any]:
@@ -253,7 +253,7 @@ class EmailVerificationService:
         doc_ref = self._get_db().collection(self.collection).document(email_key)
         doc = doc_ref.get()
         if not doc.exists:
-            return {"success": False, "error": "NOT_REQUESTED", "message": "No verification request for this email"}
+            return {"success": False, "error": "NOT_REQUESTED", "message": "We couldn't find a verification request for this email. Please request a new verification code."}
         data = doc.to_dict()
 
         # Expired?
@@ -262,21 +262,21 @@ class EmailVerificationService:
         except Exception:
             expiry = data.get('expires_at')
         if expiry < self._now_utc():
-            return {"success": False, "error": "EXPIRED", "message": "Code expired"}
+            return {"success": False, "error": "EXPIRED", "message": "This verification code has expired. Please request a new one."}
 
         # Already used?
         if data.get('used'):
-            return {"success": False, "error": "ALREADY_USED", "message": "Code already used"}
+            return {"success": False, "error": "ALREADY_USED", "message": "This verification code has already been used. Your email is already verified!"}
 
         # Too many attempts?
         attempts = int(data.get('attempts', 0))
         if attempts >= self.max_attempts:
-            return {"success": False, "error": "TOO_MANY_ATTEMPTS", "message": "Too many attempts. Request a new code."}
+            return {"success": False, "error": "TOO_MANY_ATTEMPTS", "message": "Too many incorrect attempts. Please request a new verification code."}
 
         if str(code).strip() != str(data.get('code', '')).strip():
             # increment attempts
             doc_ref.update({'attempts': attempts + 1})
-            return {"success": False, "error": "INVALID_CODE", "message": "Invalid code"}
+            return {"success": False, "error": "INVALID_CODE", "message": "The verification code you entered is incorrect. Please check and try again."}
 
         # Mark used
         doc_ref.update({'used': True, 'verified_at': self._now_utc()})

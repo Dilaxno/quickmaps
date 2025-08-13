@@ -32,6 +32,9 @@ from firebase_admin import credentials, firestore, auth
 # Import configuration
 from config import *
 
+# Import user-friendly error handling
+from user_friendly_errors import get_user_friendly_error, get_context_specific_error, format_validation_error
+
 # Import existing services
 from groq_processor import groq_generator
 from quiz_generator import quiz_generator
@@ -394,7 +397,8 @@ async def download_youtube(
     
     except Exception as e:
         job_manager.set_job_error(job_id, str(e))
-        raise HTTPException(status_code=500, detail=f"YouTube download failed: {str(e)}")
+        logger.error(f"YouTube download failed: {e}")
+        raise HTTPException(status_code=500, detail="We're having trouble downloading this YouTube video. Please check the URL and try again.")
 
 # TED Talk download endpoint
 @app.post("/download-tedtalk/")
@@ -448,7 +452,8 @@ async def download_tedtalk(
     
     except Exception as e:
         job_manager.set_job_error(job_id, str(e))
-        raise HTTPException(status_code=500, detail=f"TED Talk download failed: {str(e)}")
+        logger.error(f"TED Talk download failed: {e}")
+        raise HTTPException(status_code=500, detail="We're having trouble downloading this TED Talk. Please check the URL and try again.")
 
 # Udemy course URL endpoint
 @app.post("/process-udemy-url/")
@@ -495,7 +500,8 @@ async def process_udemy_url(
     
     except Exception as e:
         job_manager.set_job_error(job_id, str(e))
-        raise HTTPException(status_code=500, detail=f"Udemy course download failed: {str(e)}")
+        logger.error(f"Udemy course download failed: {e}")
+        raise HTTPException(status_code=500, detail="We're having trouble downloading this Udemy course. Please check the URL and try again.")
 
 # PDF upload endpoint
 @app.post("/upload-pdf/")
@@ -508,11 +514,11 @@ async def upload_pdf(
     
     # Validate file type
     if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+        raise HTTPException(status_code=400, detail=get_user_friendly_error("INVALID_FILE_TYPE", "upload"))
     
     # Check file size (limit to 50MB for PDFs)
     if file.size and file.size > 50 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="PDF file too large. Maximum size is 50MB.")
+        raise HTTPException(status_code=400, detail=get_context_specific_error("FILE_TOO_LARGE", "upload"))
     
     # Extract user information from Firebase token
     user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
@@ -555,7 +561,8 @@ async def upload_pdf(
     
     except Exception as e:
         job_manager.set_job_error(job_id, str(e))
-        raise HTTPException(status_code=500, detail=f"PDF upload failed: {str(e)}")
+        logger.error(f"PDF upload failed: {e}")
+        raise HTTPException(status_code=500, detail=get_context_specific_error("UPLOAD_FAILED", "upload"))
 
 # Job status endpoint
 @app.get("/status/{job_id}")
@@ -3167,10 +3174,16 @@ async def register_user(user_data: RegisterUserRequest, request: Request):
             )
             logger.info(f"✅ User created in Firebase Auth: {user_record.uid}")
         except auth.EmailAlreadyExistsError:
-            raise HTTPException(status_code=400, detail="Email already exists")
+            logger.warning(f"Registration attempt with existing email: {email}")
+            raise HTTPException(status_code=400, detail=get_context_specific_error("auth/email-already-in-use", "signup"))
         except Exception as e:
             logger.error(f"❌ Error creating user in Firebase Auth: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to create user: {str(e)}")
+            # Check if it's a known Firebase error
+            error_code = getattr(e, 'code', str(e))
+            if 'auth/' in str(error_code):
+                raise HTTPException(status_code=400, detail=get_context_specific_error(str(error_code), "signup"))
+            else:
+                raise HTTPException(status_code=500, detail="We're having trouble creating your account right now. Please try again in a few moments.")
         
         # Send welcome email
         try:
@@ -3873,10 +3886,10 @@ async def forgot_password(request: ForgotPasswordRequest):
         if result:
             return {"message": "Password reset email sent successfully"}
         else:
-            raise HTTPException(status_code=400, detail="Failed to send password reset email")
+            raise HTTPException(status_code=400, detail="We couldn't send a password reset email to this address. Please check that you entered the correct email.")
     except Exception as e:
         logger.error(f"Forgot password error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="We're having trouble sending your password reset email. Please try again in a few moments.")
 
 @app.post("/api/auth/reset-password")
 async def reset_password(request: ResetPasswordRequest):
@@ -3905,7 +3918,7 @@ async def reset_password(request: ResetPasswordRequest):
         raise
     except Exception as e:
         logger.error(f"Reset password error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="We're having trouble resetting your password right now. Please try again in a few moments.")
 
 @app.post("/api/auth/validate-reset-token")
 async def validate_reset_token(request: TokenValidationRequest):
@@ -3921,7 +3934,7 @@ async def validate_reset_token(request: TokenValidationRequest):
         return response
     except Exception as e:
         logger.error(f"Token validation error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="We're having trouble validating your reset link. Please try requesting a new password reset.")
 
 # Email verification OTP endpoints
 from email_verification_service import email_verification_service
@@ -3942,12 +3955,12 @@ async def send_email_otp(req: SendOtpRequest):
             return {"message": "OTP sent"}
         if result.get("error") == "RESEND_COOLDOWN":
             raise HTTPException(status_code=429, detail=result.get("message"))
-        raise HTTPException(status_code=400, detail=result.get("message", "Failed to send OTP"))
+        raise HTTPException(status_code=400, detail=result.get("message", "We couldn't send the verification email. Please try again."))
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"send_email_otp error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="We're having trouble sending your verification email. Please try again in a few moments.")
 
 @app.post("/api/auth/verify-email-otp")
 async def verify_email_otp(req: VerifyOtpRequest):
@@ -3963,12 +3976,12 @@ async def verify_email_otp(req: VerifyOtpRequest):
             raise HTTPException(status_code=410, detail=result.get("message"))
         if err == "TOO_MANY_ATTEMPTS":
             raise HTTPException(status_code=429, detail=result.get("message"))
-        raise HTTPException(status_code=400, detail=result.get("message", "Verification failed"))
+        raise HTTPException(status_code=400, detail=result.get("message", "We couldn't verify your email. Please check your code and try again."))
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"verify_email_otp error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        raise HTTPException(status_code=500, detail="We're having trouble verifying your email right now. Please try again in a few moments.")
 
 @app.get("/verify-email")
 async def verify_email_via_url(email: str, code: str):
