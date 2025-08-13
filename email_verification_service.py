@@ -38,6 +38,11 @@ class EmailVerificationService:
             logger.error('Brevo service not configured; cannot send verification email')
             return False
 
+        # Define variables for the template
+        frontend_url = brevo_service.frontend_url
+        current_year = datetime.now().year
+        expiry_minutes = self.expiry_minutes
+
         subject = '✅ Verify your email - QuickMaps'
         html_content = f"""
         <!DOCTYPE html>
@@ -118,28 +123,28 @@ class EmailVerificationService:
         <body>
             <div class=\"container\">
                 <div class=\"header\">
-                    <div class=\"logo\"><img src=\"{brevo_service.frontend_url}/logo.svg\" alt=\"QuickMaps logo\" /></div>
+                    <div class=\"logo\"><img src=\"{frontend_url}/logo.svg\" alt=\"QuickMaps logo\" /></div>
                     <div class=\"brand-title\">QuickMaps</div>
                     <p class=\"tagline\">AI-powered visual notes and mind maps</p>
                 </div>
                 <div class=\"content\">
                     <p class=\"greeting\">Hi {name},</p>
-                    <p class=\"subtitle\">Use this one-time verification code to complete your sign up. It expires in {self.expiry_minutes} minutes.</p>
+                    <p class=\"subtitle\">Use this one-time verification code to complete your sign up. It expires in {expiry_minutes} minutes.</p>
                     <span class=\"code-box\">{code}</span>
                     <div class=\"button-container\">
-                        <a href=\"{brevo_service.frontend_url}\" class=\"button\">Open QuickMaps</a>
+                        <a href=\"{frontend_url}\" class=\"button\">Open QuickMaps</a>
                     </div>
                     <div class=\"divider\"></div>
                     <p class=\"note\">If you didn’t request this, you can safely ignore this email.</p>
                 </div>
                 <div class=\"footer\">
-                    <p>© {datetime.now().year} QuickMaps. All rights reserved. <a href=\"{brevo_service.frontend_url}\">{brevo_service.frontend_url}</a></p>
+                    <p>© {current_year} QuickMaps. All rights reserved. <a href=\"{frontend_url}\">{frontend_url}</a></p>
                 </div>
             </div>
         </body>
         </html>
         """
-        text_content = f"Your QuickMaps verification code is: {code}\nThis code expires in {self.expiry_minutes} minutes. If you didn't request it, ignore this email."
+        text_content = f"Your QuickMaps verification code is: {code}\nThis code expires in {expiry_minutes} minutes. If you didn't request it, ignore this email."
         email_data = {
             "sender": {"name": brevo_service.sender_name, "email": brevo_service.sender_email},
             "to": [{"email": email, "name": name}],
