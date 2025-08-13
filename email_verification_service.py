@@ -34,8 +34,14 @@ class EmailVerificationService:
     def _send_via_brevo(self, email: str, code: str, name: str = 'there') -> bool:
         # Import instance to reuse config and headers
         from brevo_service import brevo_service
+        
+        logger.info(f"🔧 Attempting to send OTP email to: {email}")
+        logger.info(f"🔧 Brevo service configured: {brevo_service.is_configured()}")
+        logger.info(f"🔧 Brevo API key present: {'Yes' if brevo_service.api_key else 'No'}")
+        logger.info(f"🔧 Brevo sender email: {brevo_service.sender_email}")
+        
         if not brevo_service.is_configured():
-            logger.error('Brevo service not configured; cannot send verification email')
+            logger.error('❌ Brevo service not configured; cannot send verification email')
             return False
 
         try:
@@ -172,16 +178,28 @@ class EmailVerificationService:
                 "tags": ["email-verification", "otp"]
             }
             
+            logger.info(f"📧 Sending email via Brevo API...")
+            logger.info(f"📧 API URL: {brevo_service.base_url}/smtp/email")
+            logger.info(f"📧 Email data prepared for: {email}")
+            
             response = requests.post(
                 f"{brevo_service.base_url}/smtp/email",
                 headers=brevo_service._get_headers(),  # reuse headers builder
-                json=email_data
+                json=email_data,
+                timeout=30  # Add timeout
             )
+            
+            logger.info(f"📧 Brevo API response status: {response.status_code}")
+            logger.info(f"📧 Brevo API response headers: {dict(response.headers)}")
+            
             if response.status_code == 201:
-                logger.info(f"Sent OTP to {email}")
+                logger.info(f"✅ Successfully sent OTP email to {email}")
                 return True
-            logger.error(f"Brevo OTP send failed: {response.status_code} - {response.text}")
-            return False
+            else:
+                logger.error(f"❌ Brevo OTP send failed: {response.status_code}")
+                logger.error(f"❌ Response body: {response.text}")
+                logger.error(f"❌ Request headers: {brevo_service._get_headers()}")
+                return False
         except Exception as e:
             logger.error(f"Error in _send_via_brevo: {e}")
             import traceback
