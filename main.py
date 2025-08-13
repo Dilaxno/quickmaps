@@ -7,6 +7,7 @@ between different services for video transcription, PDF processing, and more.
 
 import os
 import shutil
+import time
 from pathlib import Path
 from typing import Optional, Dict, Union
 import uuid
@@ -208,12 +209,15 @@ async def health_check():
     }
 
 @app.get("/api/cors-test")
-async def cors_test():
+async def cors_test(request: Request):
     """Simple endpoint to test CORS configuration"""
     return {
         "message": "CORS is working!",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "server": "quickmaps-backend"
+        "server": "quickmaps-backend",
+        "origin": request.headers.get("origin"),
+        "user_agent": request.headers.get("user-agent"),
+        "headers": dict(request.headers)
     }
 
 # Initialize Firebase Admin SDK
@@ -384,6 +388,19 @@ logger.info(f"🌐 CORS headers: {CORS_HEADERS}")
 logger.info(f"🌐 CORS configured_origins from config: {configured_origins}")
 logger.info(f"🌐 CORS extra_origins: {extra_origins}")
 logger.info(f"🌐 CORS allow_credentials: True")
+
+# Add middleware to log all requests for debugging
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    logger.info(f"🌐 {request.method} {request.url} - Origin: {request.headers.get('origin', 'None')}")
+    
+    response = await call_next(request)
+    
+    process_time = time.time() - start_time
+    logger.info(f"🌐 Response: {response.status_code} - Time: {process_time:.3f}s")
+    
+    return response
 
 # Capture ?ref=... and set cookie
 app.add_middleware(AffiliateAttributionMiddleware)
