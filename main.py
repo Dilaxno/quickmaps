@@ -75,6 +75,11 @@ class CreateBookmarkRequest(BaseModel):
     content: str
     metadata: Optional[Dict] = None
 
+class UpdateBookmarkRequest(BaseModel):
+    title: Optional[str] = None
+    content: Optional[str] = None
+    metadata: Optional[Dict] = None
+
 class ForgotPasswordRequest(BaseModel):
     email: str
 
@@ -1548,6 +1553,65 @@ async def create_bookmark(
     except Exception as e:
         logger.error(f"❌ Error creating bookmark: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to create bookmark: {str(e)}")
+
+@app.put("/api/bookmarks/{bookmark_id}")
+async def update_bookmark(
+    bookmark_id: str,
+    update_data: UpdateBookmarkRequest,
+    request: Request = None
+):
+    """Update an existing bookmark"""
+    try:
+        logger.info(f"🔖 Updating bookmark: {bookmark_id}")
+        
+        # Extract user information
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        logger.info(f"🔖 Update request from user: {user_id}")
+        
+        # Validate inputs
+        if update_data.title is not None and len(update_data.title) > 200:
+            raise HTTPException(status_code=400, detail="Title must be 200 characters or less")
+        
+        if update_data.content is not None and len(update_data.content) > 10000:
+            raise HTTPException(status_code=400, detail="Content must be 10000 characters or less")
+        
+        # Get existing bookmark to verify ownership
+        existing_bookmarks = r2_storage.get_user_bookmarks(user_id=user_id, limit=1000)
+        existing_bookmark = None
+        for bookmark in existing_bookmarks:
+            if bookmark.get('bookmark_id') == bookmark_id:
+                existing_bookmark = bookmark
+                break
+        
+        if not existing_bookmark:
+            raise HTTPException(status_code=404, detail="Bookmark not found or access denied")
+        
+        # Update bookmark in R2 storage
+        success = r2_storage.update_bookmark(
+            user_id=user_id,
+            bookmark_id=bookmark_id,
+            title=update_data.title,
+            content=update_data.content,
+            metadata=update_data.metadata
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update bookmark")
+        
+        logger.info(f"✅ Bookmark updated successfully: {bookmark_id}")
+        
+        return {
+            "status": "success",
+            "success": True,
+            "bookmark_id": bookmark_id,
+            "message": "Bookmark updated successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error updating bookmark: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update bookmark: {str(e)}")
 
 @app.delete("/api/bookmarks/{bookmark_id}")
 async def delete_bookmark(
@@ -3316,7 +3380,8 @@ async def register_user(user_data: RegisterUserRequest, request: Request):
             user_record = auth.create_user(
                 email=email,
                 password=password,
-                display_name=name
+                display_name=name,
+                email_verified=True
             )
             logger.info(f"✅ User created in Firebase Auth: {user_record.uid}")
         except auth.EmailAlreadyExistsError:
@@ -3377,7 +3442,7 @@ async def register_user(user_data: RegisterUserRequest, request: Request):
                 'email': email,
                 'name': name or email.split('@')[0],
                 'created_at': datetime.now(),
-                'email_verified': False,
+                'email_verified': True,
                 'profile_completed': False,
                 'affiliateRef': affiliate_ref if affiliate_ref else None,
             }
@@ -3389,7 +3454,7 @@ async def register_user(user_data: RegisterUserRequest, request: Request):
             else:
                 # Just update the additional fields
                 update_data = {
-                    'email_verified': False,
+                    'email_verified': True,
                     'profile_completed': False,
                 }
                 if affiliate_ref:
@@ -3407,7 +3472,7 @@ async def register_user(user_data: RegisterUserRequest, request: Request):
                 "uid": user_record.uid,
                 "email": email,
                 "name": name or email.split('@')[0],
-                "email_verified": user_record.email_verified,
+                "email_verified": True,
                 "credits": 10 if credits_initialized else 0
             },
             "credits": {
@@ -4095,97 +4160,22 @@ class VerifyOtpRequest(BaseModel):
 
 @app.post("/api/auth/send-email-otp")
 async def send_email_otp(req: SendOtpRequest):
-    try:
-        result = email_verification_service.create_and_send(req.email, req.name)
-        if result.get("success"):
-            return {"message": "OTP sent"}
-        if result.get("error") == "RESEND_COOLDOWN":
-            raise HTTPException(status_code=429, detail=result.get("message"))
-        raise HTTPException(status_code=400, detail=result.get("message", "We couldn't send the verification email. Please try again."))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"send_email_otp error: {e}")
-        raise HTTPException(status_code=500, detail="We're having trouble sending your verification email. Please try again in a few moments.")
+    """OTP disabled: respond with success to avoid blocking legacy clients"""
+    return {"message": "OTP disabled", "success": True}
 
 @app.post("/api/auth/verify-email-otp")
 async def verify_email_otp(req: VerifyOtpRequest):
-    try:
-        result = email_verification_service.verify(req.email, req.otp)
-        if result.get("success"):
-            return {"message": "Email verified"}
-        # Map errors
-        err = result.get("error")
-        if err in ("NOT_REQUESTED", "INVALID_CODE"):
-            raise HTTPException(status_code=400, detail=result.get("message"))
-        if err in ("EXPIRED", "ALREADY_USED"):
-            raise HTTPException(status_code=410, detail=result.get("message"))
-        if err == "TOO_MANY_ATTEMPTS":
-            raise HTTPException(status_code=429, detail=result.get("message"))
-        raise HTTPException(status_code=400, detail=result.get("message", "We couldn't verify your email. Please check your code and try again."))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"verify_email_otp error: {e}")
-        raise HTTPException(status_code=500, detail="We're having trouble verifying your email right now. Please try again in a few moments.")
+    """OTP disabled: treat as verified for backward compatibility"""
+    return {"message": "Email verified", "success": True}
 
 @app.get("/verify-email")
 async def verify_email_via_url(email: str, code: str):
-    """Handle email verification via URL and redirect to dashboard"""
-    try:
-        logger.info(f"Email verification via URL: {email} with code: {code}")
-        
-        # Verify the email using the existing service
-        result = email_verification_service.verify(email, code)
-        
-        if result.get("success"):
-            logger.info(f"Email verification successful for: {email}")
-            # Redirect to dashboard with success message
-            from fastapi.responses import RedirectResponse
-            return RedirectResponse(
-                url="https://quickmaps.pro/dashboard?verified=true",
-                status_code=302
-            )
-        else:
-            # Handle different error cases
-            err = result.get("error")
-            error_message = result.get("message", "Verification failed")
-            
-            logger.error(f"Email verification failed for {email}: {err} - {error_message}")
-            
-            # Redirect to error page with appropriate message
-            if err == "EXPIRED":
-                return RedirectResponse(
-                    url="https://quickmaps.pro/signup?error=expired",
-                    status_code=302
-                )
-            elif err == "ALREADY_USED":
-                return RedirectResponse(
-                    url="https://quickmaps.pro/dashboard?verified=true",
-                    status_code=302
-                )
-            elif err in ("NOT_REQUESTED", "INVALID_CODE"):
-                return RedirectResponse(
-                    url="https://quickmaps.pro/signup?error=invalid",
-                    status_code=302
-                )
-            elif err == "TOO_MANY_ATTEMPTS":
-                return RedirectResponse(
-                    url="https://quickmaps.pro/signup?error=attempts",
-                    status_code=302
-                )
-            else:
-                return RedirectResponse(
-                    url="https://quickmaps.pro/signup?error=failed",
-                    status_code=302
-                )
-                
-    except Exception as e:
-        logger.error(f"verify_email_via_url error: {e}")
-        return RedirectResponse(
-            url="https://quickmaps.pro/signup?error=server",
-            status_code=302
-        )
+    """OTP disabled: always redirect to dashboard as verified"""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(
+        url="https://quickmaps.pro/dashboard?verified=true",
+        status_code=302
+    )
 
 # User Statistics endpoints
 @app.get("/api/user-statistics/{user_id}")

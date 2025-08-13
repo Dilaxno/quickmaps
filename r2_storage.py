@@ -615,6 +615,92 @@ class R2StorageService:
             logger.error(f"❌ Failed to delete bookmark: {e}")
             return False
 
+    def update_bookmark(self, user_id: str, bookmark_id: str, title: Optional[str] = None, content: Optional[str] = None, metadata: Optional[Dict] = None) -> bool:
+        """
+        Update fields of a bookmark JSON in R2.
+        
+        Args:
+            user_id: User ID
+            bookmark_id: Bookmark ID to update
+            title: Optional new title
+            content: Optional new content
+            metadata: Optional metadata to merge/replace
+        
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        if not self.is_available():
+            logger.debug("R2 storage not available for bookmark update")
+            return False
+        try:
+            # Find the bookmark object key by scanning user's bookmark folder
+            search_prefix = f"users/{user_id}/bookmarks/"
+            paginator = self.client.get_paginator('list_objects_v2')
+            page_iterator = paginator.paginate(
+                Bucket=R2_BUCKET_NAME,
+                Prefix=search_prefix
+            )
+            
+            for page in page_iterator:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        key = obj['Key']
+                        if not key.endswith('.json') or bookmark_id not in key:
+                            continue
+                        # Verify and update the correct bookmark
+                        try:
+                            response = self.client.get_object(Bucket=R2_BUCKET_NAME, Key=key)
+                            content_str = response['Body'].read().decode('utf-8')
+                            data = json.loads(content_str)
+                            
+                            if data.get('bookmark_id') != bookmark_id:
+                                continue
+                            
+                            # Apply updates
+                            if title is not None:
+                                data['title'] = title
+                            if content is not None:
+                                data['content'] = content
+                            if metadata is not None:
+                                existing_meta = data.get('metadata') or {}
+                                if isinstance(metadata, dict):
+                                    existing_meta.update(metadata)
+                                    data['metadata'] = existing_meta
+                                else:
+                                    data['metadata'] = metadata
+                            
+                            data['updated_at'] = datetime.now(timezone.utc).isoformat()
+                            
+                            # Write back to R2
+                            self.client.put_object(
+                                Bucket=R2_BUCKET_NAME,
+                                Key=key,
+                                Body=json.dumps(data, indent=2, ensure_ascii=False),
+                                ContentType='application/json',
+                                Metadata={
+                                    'user-id': str(user_id),
+                                    'job-id': str(data.get('job_id', '')),
+                                    'section-id': str(data.get('section_id', '')),
+                                    'title': str(data.get('title', ''))[:100],
+                                    'bookmark-id': str(bookmark_id),
+                                    'updated-at': str(data.get('updated_at', ''))
+                                }
+                            )
+                            logger.info(f"✅ Updated bookmark in R2: {key}")
+                            return True
+                        except Exception as e:
+                            logger.warning(f"Failed to update candidate bookmark {key}: {e}")
+                            continue
+            
+            logger.info(f"📝 Bookmark not found for update: {bookmark_id}")
+            return False
+        except ClientError as e:
+            logger.error(f"❌ R2 client error during bookmark update: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Failed to update bookmark: {e}")
+            return False
+
     def bookmark_exists(self, user_id: str, bookmark_id: str) -> bool:
         """
         Check if a bookmark exists
