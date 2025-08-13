@@ -38,55 +38,61 @@ class EmailVerificationService:
             logger.error('Brevo service not configured; cannot send verification email')
             return False
 
-        # Define variables for the template
-        frontend_url = brevo_service.frontend_url
-        current_year = datetime.now().year
-        expiry_minutes = self.expiry_minutes
+        try:
+            # Define variables for the template
+            frontend_url = brevo_service.frontend_url
+            current_year = datetime.now().year
+            expiry_minutes = self.expiry_minutes
+            
+            logger.info(f"Creating email template with variables: frontend_url={frontend_url}, current_year={current_year}, expiry_minutes={expiry_minutes}")
 
-        subject = '✅ Verify your email - QuickMaps'
-        html_content = f"""
+            subject = '✅ Verify your email - QuickMaps'
+            
+            logger.info("Creating HTML content...")
+            # Use string formatting to avoid f-string issues with CSS properties
+            html_template = """
         <!DOCTYPE html>
-        <html lang=\"en\">
+        <html lang="en">
         <head>
-            <meta charset=\"UTF-8\">
-            <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Verify your email - QuickMaps</title>
-            <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">
-            <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>
-            <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap\" rel=\"stylesheet\">
+            <link rel="preconnect" href="https://fonts.googleapis.com">
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
             <style>
                 /* Enterprise brand: deep navy (#090040) gradient */
-                body {
+                body {{
                     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     margin: 0;
                     padding: 20px;
                     background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
                     color: #111827;
                     line-height: 1.6;
-                }
-                .container {
+                }}
+                .container {{
                     max-width: 600px;
                     margin: 0 auto;
                     background: #ffffff;
                     border-radius: 16px;
                     overflow: hidden;
                     box-shadow: 0 10px 30px rgba(9, 0, 64, 0.12);
-                }
-                .header {
+                }}
+                .header {{
                     background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
                     color: #ffffff;
                     text-align: center;
                     padding: 36px 30px;
                     position: relative;
-                }
-                .logo { margin-bottom: 16px; }
-                .logo img { height: 48px; width: auto; max-width: 200px; }
-                .brand-title { font-size: 28px; font-weight: 800; margin: 8px 0 0 0; letter-spacing: 0.2px; text-shadow: 0 2px 4px rgba(0,0,0,0.12); }
-                .tagline { font-size: 14px; opacity: 0.95; margin: 6px 0 0 0; }
-                .content { padding: 32px 30px; }
-                .greeting { font-size: 20px; font-weight: 700; color: #090040; margin: 0 0 12px 0; }
-                .subtitle { color: #495057; margin: 0 0 24px 0; }
-                .code-box {
+                }}
+                .logo {{ margin-bottom: 16px; }}
+                .logo img {{ height: 48px; width: auto; max-width: 200px; }}
+                .brand-title {{ font-size: 28px; font-weight: 800; margin: 8px 0 0 0; letter-spacing: 0.2px; text-shadow: 0 2px 4px rgba(0,0,0,0.12); }}
+                .tagline {{ font-size: 14px; opacity: 0.95; margin: 6px 0 0 0; }}
+                .content {{ padding: 32px 30px; }}
+                .greeting {{ font-size: 20px; font-weight: 700; color: #090040; margin: 0 0 12px 0; }}
+                .subtitle {{ color: #495057; margin: 0 0 24px 0; }}
+                .code-box {{
                     display: block;
                     font-size: 36px;
                     font-weight: 800;
@@ -98,9 +104,9 @@ class EmailVerificationService:
                     text-align: center;
                     border: 2px dashed rgba(9, 0, 64, 0.25);
                     box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
-                }
-                .button-container { text-align: center; margin: 28px 0 8px 0; }
-                .button {
+                }}
+                .button-container {{ text-align: center; margin: 28px 0 8px 0; }}
+                .button {{
                     display: inline-block;
                     background: #090040;
                     color: #ffffff !important;
@@ -112,48 +118,58 @@ class EmailVerificationService:
                     box-shadow: 0 6px 18px rgba(9, 0, 64, 0.25);
                     transition: all 0.25s ease;
                     border: 1px solid rgba(255,255,255,0.3);
-                }
-                .button:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(9, 0, 64, 0.35); }
-                .note { font-size: 12px; color: #6b7280; text-align: center; margin-top: 12px; }
-                .divider { height: 1px; background: #e5e7eb; margin: 28px 0; }
-                .footer { background: linear-gradient(135deg, #f9fafb 0%, #f1f5f9 100%); padding: 22px 28px; text-align: center; color: #6b7280; font-size: 12px; }
-                .footer a { color: #090040; text-decoration: none; font-weight: 600; }
+                }}
+                .button:hover {{ transform: translateY(-2px); box-shadow: 0 10px 24px rgba(9, 0, 64, 0.35); }}
+                .note {{ font-size: 12px; color: #6b7280; text-align: center; margin-top: 12px; }}
+                .divider {{ height: 1px; background: #e5e7eb; margin: 28px 0; }}
+                .footer {{ background: linear-gradient(135deg, #f9fafb 0%, #f1f5f9 100%); padding: 22px 28px; text-align: center; color: #6b7280; font-size: 12px; }}
+                .footer a {{ color: #090040; text-decoration: none; font-weight: 600; }}
             </style>
         </head>
         <body>
-            <div class=\"container\">
-                <div class=\"header\">
-                    <div class=\"logo\"><img src=\"{frontend_url}/logo.svg\" alt=\"QuickMaps logo\" /></div>
-                    <div class=\"brand-title\">QuickMaps</div>
-                    <p class=\"tagline\">AI-powered visual notes and mind maps</p>
+            <div class="container">
+                <div class="header">
+                    <div class="logo"><img src="{frontend_url}/logo.svg" alt="QuickMaps logo" /></div>
+                    <div class="brand-title">QuickMaps</div>
+                    <p class="tagline">AI-powered visual notes and mind maps</p>
                 </div>
-                <div class=\"content\">
-                    <p class=\"greeting\">Hi {name},</p>
-                    <p class=\"subtitle\">Use this one-time verification code to complete your sign up. It expires in {expiry_minutes} minutes.</p>
-                    <span class=\"code-box\">{code}</span>
-                    <div class=\"button-container\">
-                        <a href=\"{frontend_url}\" class=\"button\">Open QuickMaps</a>
+                <div class="content">
+                    <p class="greeting">Hi {name},</p>
+                    <p class="subtitle">Use this one-time verification code to complete your sign up. It expires in {expiry_minutes} minutes.</p>
+                    <span class="code-box">{code}</span>
+                    <div class="button-container">
+                        <a href="{frontend_url}" class="button">Open QuickMaps</a>
                     </div>
-                    <div class=\"divider\"></div>
-                    <p class=\"note\">If you didn’t request this, you can safely ignore this email.</p>
+                    <div class="divider"></div>
+                    <p class="note">If you didn't request this, you can safely ignore this email.</p>
                 </div>
-                <div class=\"footer\">
-                    <p>© {current_year} QuickMaps. All rights reserved. <a href=\"{frontend_url}\">{frontend_url}</a></p>
+                <div class="footer">
+                    <p>© {current_year} QuickMaps. All rights reserved. <a href="{frontend_url}">{frontend_url}</a></p>
                 </div>
             </div>
         </body>
         </html>
         """
-        text_content = f"Your QuickMaps verification code is: {code}\nThis code expires in {expiry_minutes} minutes. If you didn't request it, ignore this email."
-        email_data = {
-            "sender": {"name": brevo_service.sender_name, "email": brevo_service.sender_email},
-            "to": [{"email": email, "name": name}],
-            "subject": subject,
-            "htmlContent": html_content,
-            "textContent": text_content,
-            "tags": ["email-verification", "otp"]
-        }
-        try:
+            
+            html_content = html_template.format(
+                frontend_url=frontend_url,
+                name=name,
+                expiry_minutes=expiry_minutes,
+                code=code,
+                current_year=current_year
+            )
+            
+            text_content = f"Your QuickMaps verification code is: {code}\nThis code expires in {expiry_minutes} minutes. If you didn't request it, ignore this email."
+            
+            email_data = {
+                "sender": {"name": brevo_service.sender_name, "email": brevo_service.sender_email},
+                "to": [{"email": email, "name": name}],
+                "subject": subject,
+                "htmlContent": html_content,
+                "textContent": text_content,
+                "tags": ["email-verification", "otp"]
+            }
+            
             response = requests.post(
                 f"{brevo_service.base_url}/smtp/email",
                 headers=brevo_service._get_headers(),  # reuse headers builder
@@ -165,7 +181,9 @@ class EmailVerificationService:
             logger.error(f"Brevo OTP send failed: {response.status_code} - {response.text}")
             return False
         except Exception as e:
-            logger.error(f"Error sending OTP via Brevo: {e}")
+            logger.error(f"Error in _send_via_brevo: {e}")
+            import traceback
+            logger.error(f"Full traceback: {traceback.format_exc()}")
             return False
 
     def can_resend(self, email: str) -> bool:
