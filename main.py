@@ -290,6 +290,7 @@ except Exception:
 extra_origins = [
     "https://quickmaps.pro",
     "https://www.quickmaps.pro",
+    "https://api.quickmaps.pro",  # Add API subdomain
 ]
 
 # Add local development origins when not running in production
@@ -328,6 +329,11 @@ app.add_middleware(
     max_age=86400,
 )
 
+# Log CORS configuration for debugging
+logger.info(f"🌐 CORS configured with origins: {allowed_origins}")
+logger.info(f"🌐 CORS methods: {CORS_METHODS}")
+logger.info(f"🌐 CORS headers: {CORS_HEADERS}")
+
 # Capture ?ref=... and set cookie
 app.add_middleware(AffiliateAttributionMiddleware)
 
@@ -338,10 +344,21 @@ for directory in [UPLOAD_DIR, OUTPUT_DIR, TEMP_DIR, STATIC_DIR]:
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
-# Global CORS preflight handler (ensures 200 OK for all OPTIONS requests)
-@app.options("/{rest_of_path:path}")
-async def preflight_handler(rest_of_path: str):
-    return Response(status_code=200)
+# Health check endpoint for CORS debugging
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "cors_origins": allowed_origins
+    }
+
+# OPTIONS handler for preflight requests
+@app.options("/{path:path}")
+async def options_handler(path: str):
+    """Handle preflight OPTIONS requests"""
+    return {"message": "OK"}
 
 # Basic endpoints
 @app.get("/")
