@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quickmaps Learning Notes - Quickmaps Project</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+        
+        .header .subtitle {
+            font-size: 1.1rem;
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+        
+        .metadata {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+        
+        .metadata-item {
+            background: rgba(255,255,255,0.2);
+            padding: 10px 20px;
+            border-radius: 25px;
+            font-size: 0.9rem;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
+        }
+        
+        .section-header {
+            background: #f8fafc;
+            padding: 20px;
+            border-bottom: 2px solid #e2e8f0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .section-icon {
+            width: 24px;
+            height: 24px;
+            background: #4f46e5;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+        }
+        
+        .section-title {
+            font-size: 1.4rem;
+            font-weight: 600;
+            color: #1e293b;
+        }
+        
+        .section-content {
+            padding: 30px;
+            background: white;
+        }
+        
+        .notes-content {
+            font-size: 1.1rem;
+            line-height: 1.8;
+        }
+        
+        .notes-content h1, .notes-content h2, .notes-content h3 {
+            color: #1e293b;
+            margin: 25px 0 15px 0;
+            font-weight: 600;
+        }
+        
+        .notes-content h1 {
+            font-size: 1.8rem;
+            border-bottom: 3px solid #4f46e5;
+            padding-bottom: 10px;
+        }
+        
+        .notes-content h2 {
+            font-size: 1.5rem;
+            color: #4f46e5;
+        }
+        
+        .notes-content h3 {
+            font-size: 1.3rem;
+            color: #7c3aed;
+        }
+        
+        .notes-content ul, .notes-content ol {
+            margin: 15px 0 15px 30px;
+        }
+        
+        .notes-content li {
+            margin: 8px 0;
+        }
+        
+        .notes-content p {
+            margin: 15px 0;
+        }
+        
+        .notes-content strong {
+            color: #1e293b;
+            font-weight: 600;
+        }
+        
+        .notes-content code {
+            background: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.9em;
+        }
+        
+        .transcription-content {
+            background: #f8fafc;
+            padding: 25px;
+            border-radius: 8px;
+            font-family: 'Georgia', serif;
+            font-size: 1rem;
+            line-height: 1.7;
+            color: #475569;
+            border-left: 4px solid #4f46e5;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .stat-card {
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .stat-value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: #4f46e5;
+            margin-bottom: 5px;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: #64748b;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .quiz-content {
+            background: #fefce8;
+            border: 2px solid #fbbf24;
+            border-radius: 10px;
+            padding: 25px;
+            margin: 20px 0;
+        }
+        
+        .quiz-question {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: white;
+            border-radius: 8px;
+            border-left: 4px solid #f59e0b;
+        }
+        
+        .quiz-question h4 {
+            color: #92400e;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+        
+        .quiz-options {
+            list-style: none;
+            margin: 10px 0;
+        }
+        
+        .quiz-options li {
+            padding: 8px 0;
+            color: #78716c;
+        }
+        
+        .quiz-options .correct {
+            color: #059669;
+            font-weight: 600;
+        }
+        
+        .footer {
+            background: #f8fafc;
+            padding: 30px;
+            text-align: center;
+            border-top: 1px solid #e2e8f0;
+            color: #64748b;
+        }
+        
+        .footer .logo {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #4f46e5;
+            margin-bottom: 10px;
+        }
+        
+        .footer .tagline {
+            font-size: 0.9rem;
+            margin-bottom: 15px;
+        }
+        
+        .footer .timestamp {
+            font-size: 0.8rem;
+            opacity: 0.7;
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+            
+            .metadata {
+                gap: 15px;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .no-content {
+            text-align: center;
+            color: #64748b;
+            font-style: italic;
+            padding: 40px;
+            background: #f8fafc;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Quickmaps Learning Notes</h1>
+            <div class="subtitle">Generated Learning Notes & Analysis</div>
+            <div class="metadata">
+                <div class="metadata-item">📅 January 15, 2024 at 10:30 AM UTC</div>
+                <div class="metadata-item">🎯 ENGLISH</div>
+                <div class="metadata-item">⏱️ 7m</div>
+                <div class="metadata-item">📊 15 segments</div>
+            </div>
+        </div>
+        
+        <div class="content">
+            <!-- Statistics Section -->
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-icon">📊</div>
+                    <div class="section-title">Processing Statistics</div>
+                </div>
+                <div class="section-content">
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <div class="stat-value">15</div>
+                            <div class="stat-label">Audio Segments</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">85%</div>
+                            <div class="stat-label">Timestamp Coverage</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">12</div>
+                            <div class="stat-label">Mapped Sections</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-value">300s</div>
+                            <div class="stat-label">Processing Time</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Notes Section -->
+            
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-icon">📝</div>
+                    <div class="section-title">Structured Learning Notes</div>
+                </div>
+                <div class="section-content">
+                    <div class="notes-content">
+                        
+                    </div>
+                </div>
+            </div>
+            
+            
+            <!-- Quiz Section -->
+            
+            
+            <!-- Transcription Section -->
+            <div class="section">
+                <div class="section-header">
+                    <div class="section-icon">🎤</div>
+                    <div class="section-title">Full Transcription</div>
+                </div>
+                <div class="section-content">
+                    <div class="transcription-content">
+                        This is a sample transcription of a video about machine learning. It covers various topics including neural networks, deep learning, and artificial intelligence.
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <div class="logo">Quickmaps</div>
+            <div class="tagline">Transform any content into structured learning materials</div>
+            <div class="timestamp">Generated on January 15, 2024 at 10:30 AM UTC | Job ID: test-job-123</div>
+        </div>
+    </div>
+</body>
+</html>

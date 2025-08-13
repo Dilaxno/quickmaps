@@ -7,7 +7,7 @@ import boto3
 import json
 import logging
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from pathlib import Path
 import hashlib
 import uuid
@@ -349,6 +349,286 @@ class R2StorageService:
         except Exception as e:
             logger.error(f"❌ Failed to update note title in R2: {e}")
             return False
+    
+    def save_project_html(self, job_id: str, html_content: str, title: str, metadata: Optional[Dict] = None, user_id: str = None) -> Optional[str]:
+        """
+        Save complete HTML project page to R2 storage
+        
+        Args:
+            job_id: Unique job identifier
+            html_content: Complete HTML page content
+            title: Project title
+            metadata: Additional metadata about the project
+            user_id: Optional user ID for user-specific storage
+            
+        Returns:
+            The R2 key if successful, None otherwise
+        """
+        if not self.is_available():
+            logger.warning("R2 storage not available for HTML project")
+            return None
+        
+        try:
+            # Prepare project data
+            project_data = {
+                "job_id": job_id,
+                "title": title,
+                "html_content": html_content,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "content_hash": hashlib.sha256(html_content.encode()).hexdigest(),
+                "metadata": metadata or {},
+                "type": "project_html"
+            }
+            
+            # Generate key for HTML project
+            timestamp = datetime.now(timezone.utc).strftime("%Y/%m/%d")
+            if user_id:
+                key = f"users/{user_id}/projects/{timestamp}/{job_id}_project.html"
+                metadata_key = f"users/{user_id}/projects/{timestamp}/{job_id}_project.json"
+            else:
+                key = f"projects/{timestamp}/{job_id}_project.html"
+                metadata_key = f"projects/{timestamp}/{job_id}_project.json"
+            
+            # Upload HTML content
+            self.client.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key=key,
+                Body=html_content,
+                ContentType='text/html; charset=utf-8',
+                Metadata={
+                    'job-id': str(job_id),
+                    'title': str(title)[:100],
+                    'created-at': str(project_data["created_at"]),
+                    'type': 'project_html'
+                }
+            )
+            
+            # Upload metadata separately
+            self.client.put_object(
+                Bucket=R2_BUCKET_NAME,
+                Key=metadata_key,
+                Body=json.dumps(project_data, indent=2, ensure_ascii=False),
+                ContentType='application/json',
+                Metadata={
+                    'job-id': str(job_id),
+                    'title': str(title)[:100],
+                    'created-at': str(project_data["created_at"]),
+                    'type': 'project_metadata'
+                }
+            )
+            
+            logger.info(f"✅ Project HTML saved to R2: {key}")
+            return key
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to save project HTML to R2: {e}")
+            return None
+    
+    def get_project_html(self, job_id: str, user_id: str = None) -> Optional[str]:
+        """
+        Retrieve HTML project page from R2 storage
+        
+        Args:
+            job_id: Unique job identifier
+            user_id: Optional user ID for user-specific projects
+            
+        Returns:
+            HTML content if found, None otherwise
+        """
+        if not self.is_available():
+            logger.warning("R2 storage not available for get_project_html")
+            return None
+        
+        try:
+            logger.info(f"Getting project HTML for job_id: {job_id}, user_id: {user_id}")
+            # Try to find the HTML project key
+            key = self._find_project_html_key(job_id, user_id)
+            if not key:
+                logger.warning(f"No HTML project key found for job_id: {job_id}")
+                return None
+            
+            # Get HTML object from R2
+            response = self.client.get_object(Bucket=R2_BUCKET_NAME, Key=key)
+            html_content = response['Body'].read().decode('utf-8')
+            
+            logger.info(f"✅ Retrieved project HTML from R2: {key}")
+            return html_content
+            
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.info(f"Project HTML not found in R2 for job: {job_id}")
+            else:
+                logger.error(f"❌ Failed to retrieve project HTML from R2: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Failed to retrieve project HTML from R2: {e}")
+            return None
+    
+    def list_user_projects(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        List all HTML projects for a user
+        
+        Args:
+            user_id: User ID
+            limit: Maximum number of projects to return
+            
+        Returns:
+            List of project metadata dictionaries
+        """
+        if not self.is_available():
+            logger.warning("R2 storage not available for list_user_projects")
+            return []
+        
+        try:
+            logger.info(f"Listing projects for user: {user_id}")
+            projects = []
+            
+            # Search for project metadata files
+            prefix = f"users/{user_id}/projects/"
+            
+            paginator = self.client.get_paginator('list_objects_v2')
+            page_iterator = paginator.paginate(
+                Bucket=R2_BUCKET_NAME,
+                Prefix=prefix
+            )
+            
+            for page in page_iterator:
+                if 'Contents' in page:
+                    for obj in page['Contents']:
+                        key = obj['Key']
+                        # Only process metadata files (JSON)
+                        if key.endswith('_project.json'):
+                            try:
+                                # Get metadata
+                                response = self.client.get_object(Bucket=R2_BUCKET_NAME, Key=key)
+                                metadata_content = response['Body'].read().decode('utf-8')
+                                project_metadata = json.loads(metadata_content)
+                                
+                                # Add file info
+                                project_metadata['file_size'] = obj['Size']
+                                project_metadata['last_modified'] = obj['LastModified'].isoformat()
+                                
+                                projects.append(project_metadata)
+                                
+                                if len(projects) >= limit:
+                                    break
+                                    
+                            except Exception as e:
+                                logger.error(f"Failed to load project metadata from {key}: {e}")
+                                continue
+                
+                if len(projects) >= limit:
+                    break
+            
+            # Sort by creation date (newest first)
+            projects.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            
+            logger.info(f"✅ Found {len(projects)} projects for user {user_id}")
+            return projects
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to list user projects: {e}")
+            return []
+    
+    def delete_project_html(self, job_id: str, user_id: str = None) -> bool:
+        """
+        Delete HTML project and its metadata from R2 storage
+        
+        Args:
+            job_id: Unique job identifier
+            user_id: Optional user ID for user-specific projects
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self.is_available():
+            return False
+        
+        try:
+            # Find and delete HTML file
+            html_key = self._find_project_html_key(job_id, user_id)
+            if html_key:
+                self.client.delete_object(Bucket=R2_BUCKET_NAME, Key=html_key)
+                logger.info(f"✅ Deleted project HTML from R2: {html_key}")
+            
+            # Find and delete metadata file
+            metadata_key = self._find_project_metadata_key(job_id, user_id)
+            if metadata_key:
+                self.client.delete_object(Bucket=R2_BUCKET_NAME, Key=metadata_key)
+                logger.info(f"✅ Deleted project metadata from R2: {metadata_key}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to delete project from R2: {e}")
+            return False
+    
+    def _find_project_html_key(self, job_id: str, user_id: str = None) -> Optional[str]:
+        """Find the R2 key for a project HTML file"""
+        try:
+            logger.info(f"Searching for project HTML key with job_id: {job_id}, user_id: {user_id}")
+            
+            # Determine search prefixes based on user_id
+            if user_id:
+                prefixes = [f"users/{user_id}/projects/"]
+            else:
+                prefixes = ["projects/"]
+            
+            for prefix in prefixes:
+                paginator = self.client.get_paginator('list_objects_v2')
+                page_iterator = paginator.paginate(
+                    Bucket=R2_BUCKET_NAME,
+                    Prefix=prefix
+                )
+                
+                for page in page_iterator:
+                    if 'Contents' in page:
+                        for obj in page['Contents']:
+                            key = obj['Key']
+                            filename = key.split('/')[-1]
+                            # Check if this is the HTML file for our job
+                            if filename == f"{job_id}_project.html":
+                                logger.info(f"Found matching HTML key: {key}")
+                                return key
+            
+            logger.warning(f"No matching HTML key found for job_id: {job_id}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to find project HTML key for {job_id}: {e}")
+            return None
+    
+    def _find_project_metadata_key(self, job_id: str, user_id: str = None) -> Optional[str]:
+        """Find the R2 key for a project metadata file"""
+        try:
+            # Determine search prefixes based on user_id
+            if user_id:
+                prefixes = [f"users/{user_id}/projects/"]
+            else:
+                prefixes = ["projects/"]
+            
+            for prefix in prefixes:
+                paginator = self.client.get_paginator('list_objects_v2')
+                page_iterator = paginator.paginate(
+                    Bucket=R2_BUCKET_NAME,
+                    Prefix=prefix
+                )
+                
+                for page in page_iterator:
+                    if 'Contents' in page:
+                        for obj in page['Contents']:
+                            key = obj['Key']
+                            filename = key.split('/')[-1]
+                            # Check if this is the metadata file for our job
+                            if filename == f"{job_id}_project.json":
+                                return key
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to find project metadata key for {job_id}: {e}")
+            return None
     
     def update_notes(self, job_id: str, notes_content: str, metadata: Optional[Dict] = None) -> Optional[str]:
         """

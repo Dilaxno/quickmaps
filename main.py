@@ -4206,6 +4206,194 @@ async def dropbox_callback(request: Request):
         logger.error(f"❌ Error processing Dropbox callback: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to process callback: {str(e)}")
 
+# My Projects endpoints
+@app.get("/api/my-projects")
+async def get_my_projects(request: Request, limit: int = 50):
+    """Get all saved projects for the authenticated user"""
+    try:
+        # Extract user information from Firebase token
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        if not r2_storage.is_available():
+            raise HTTPException(status_code=503, detail="Project storage service unavailable")
+        
+        # Get user's projects from R2 storage
+        projects = r2_storage.list_user_projects(user_id, limit)
+        
+        # Format projects for frontend
+        formatted_projects = []
+        for project in projects:
+            formatted_project = {
+                "job_id": project.get("job_id"),
+                "title": project.get("title", "Untitled Project"),
+                "created_at": project.get("created_at"),
+                "updated_at": project.get("updated_at"),
+                "metadata": project.get("metadata", {}),
+                "file_size": project.get("file_size", 0),
+                "last_modified": project.get("last_modified"),
+                "language": project.get("metadata", {}).get("language", "unknown"),
+                "has_notes": project.get("metadata", {}).get("has_notes", False),
+                "segments_count": project.get("metadata", {}).get("segments_count", 0)
+            }
+            formatted_projects.append(formatted_project)
+        
+        return {
+            "status": "success",
+            "projects": formatted_projects,
+            "total": len(formatted_projects),
+            "user_id": user_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error getting user projects: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve projects")
+
+@app.get("/api/my-projects/{job_id}")
+async def get_project_page(job_id: str, request: Request):
+    """Get the complete HTML project page for a specific job"""
+    try:
+        # Extract user information from Firebase token
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        if not r2_storage.is_available():
+            raise HTTPException(status_code=503, detail="Project storage service unavailable")
+        
+        # Get HTML project page from R2 storage
+        html_content = r2_storage.get_project_html(job_id, user_id)
+        
+        if not html_content:
+            raise HTTPException(status_code=404, detail="Project not found")
+        
+        # Return HTML content directly
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(content=html_content, status_code=200)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error getting project page for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve project page")
+
+@app.delete("/api/my-projects/{job_id}")
+async def delete_project(job_id: str, request: Request):
+    """Delete a saved project"""
+    try:
+        # Extract user information from Firebase token
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        if not r2_storage.is_available():
+            raise HTTPException(status_code=503, detail="Project storage service unavailable")
+        
+        # Delete project from R2 storage
+        success = r2_storage.delete_project_html(job_id, user_id)
+        
+        if not success:
+            raise HTTPException(status_code=404, detail="Project not found or could not be deleted")
+        
+        return {
+            "status": "success",
+            "message": "Project deleted successfully",
+            "job_id": job_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error deleting project {job_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete project")
+
+@app.post("/api/projects/{job_id}/regenerate-html")
+async def regenerate_project_html(job_id: str, request: Request):
+    """Regenerate HTML project page for an existing job"""
+    try:
+        # Extract user information from Firebase token
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        
+        if not r2_storage.is_available():
+            raise HTTPException(status_code=503, detail="Project storage service unavailable")
+        
+        # Check if job exists
+        if not job_manager.job_exists(job_id):
+            raise HTTPException(status_code=404, detail="Job not found")
+        
+        # Get job data
+        job_data = job_manager.get_job_status(job_id)
+        if not job_data or job_data.get("status") != "completed":
+            raise HTTPException(status_code=400, detail="Job is not completed or data unavailable")
+        
+        # Import HTML generator
+        from html_generator import html_generator
+        
+        # Generate HTML content
+        html_content = html_generator.generate_project_html(job_id, job_data, user_id)
+        
+        if not html_content:
+            raise HTTPException(status_code=500, detail="Failed to generate HTML content")
+        
+        # Extract title
+        notes_file = OUTPUT_DIR / f"{job_id}_notes.md"
+        title = "Quickmaps Learning Notes"
+        if notes_file.exists():
+            try:
+                with open(notes_file, 'r', encoding='utf-8') as f:
+                    notes_content = f.read()
+                    title = processing_service._extract_title_from_notes(notes_content) or title
+            except Exception as e:
+                logger.warning(f"Failed to extract title from notes: {e}")
+        
+        # Prepare metadata
+        metadata = {
+            "job_id": job_id,
+            "user_id": user_id,
+            "processing_date": datetime.now().isoformat(),
+            "file_type": "project_html",
+            "regenerated": True,
+            "language": job_data.get("language", "unknown"),
+            "segments_count": job_data.get("segments_count", 0),
+            "has_notes": job_data.get("has_notes", False),
+            "content_length": len(html_content)
+        }
+        
+        # Save HTML project page to R2
+        r2_key = r2_storage.save_project_html(
+            job_id=job_id,
+            html_content=html_content,
+            title=title,
+            metadata=metadata,
+            user_id=user_id
+        )
+        
+        if not r2_key:
+            raise HTTPException(status_code=500, detail="Failed to save HTML project page")
+        
+        return {
+            "status": "success",
+            "message": "HTML project page regenerated successfully",
+            "job_id": job_id,
+            "r2_key": r2_key,
+            "title": title
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error regenerating HTML for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to regenerate HTML project page")
+
 # Health check endpoint
 @app.get("/health")
 async def health_check():

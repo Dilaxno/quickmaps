@@ -102,6 +102,9 @@ class ProcessingService:
                 # Save to R2 storage if available
                 await self._save_to_r2_storage(job_id, structured_notes, transcription_result, user_id)
                 
+                # Generate and save HTML project page
+                await self._save_html_project_page(job_id, structured_notes, transcription_result, user_id)
+                
                 # Auto-create bookmarks for important sections if user is authenticated
                 if user_id and self.db:
                     try:
@@ -297,6 +300,9 @@ class ProcessingService:
                                 logger.warning("⚠️ Failed to save PDF notes to R2 storage")
                         except Exception as e:
                             logger.error(f"❌ R2 storage error: {e}")
+                    
+                    # Generate and save HTML project page for PDF
+                    await self._save_pdf_html_project_page(job_id, structured_notes, extracted_text, user_id)
                 else:
                     logger.warning(f"Failed to generate structured notes for PDF job {job_id}")
             
@@ -583,6 +589,163 @@ class ProcessingService:
             
         except Exception as e:
             logger.warning(f"Failed to update user statistics for {user_id}: {e}")
+    
+    async def _save_html_project_page(self, job_id: str, structured_notes: str, transcription_result: Dict, user_id: Optional[str] = None):
+        """Generate and save HTML project page to R2 storage"""
+        try:
+            if not r2_storage.is_available():
+                logger.info("R2 storage not available, skipping HTML project page generation")
+                return
+            
+            # Import HTML generator
+            from html_generator import html_generator
+            
+            # Get job data for HTML generation
+            job_data = job_manager.get_job_status(job_id)
+            if not job_data:
+                logger.warning(f"Job data not found for HTML generation: {job_id}")
+                return
+            
+            # Generate HTML content
+            loop = asyncio.get_event_loop()
+            html_content = await loop.run_in_executor(
+                executor,
+                html_generator.generate_project_html,
+                job_id,
+                job_data,
+                user_id
+            )
+            
+            if not html_content:
+                logger.warning(f"Failed to generate HTML content for job {job_id}")
+                return
+            
+            # Extract title for the project
+            title = self._extract_title_from_notes(structured_notes) or "Quickmaps Learning Notes"
+            
+            # Prepare metadata
+            metadata = {
+                "job_id": job_id,
+                "user_id": user_id,
+                "processing_date": datetime.now().isoformat(),
+                "file_type": "project_html",
+                "language": transcription_result.get("language", "unknown"),
+                "segments_count": len(transcription_result.get("segments", [])),
+                "has_notes": bool(structured_notes),
+                "content_length": len(html_content)
+            }
+            
+            # Save HTML project page to R2
+            r2_key = r2_storage.save_project_html(
+                job_id=job_id,
+                html_content=html_content,
+                title=title,
+                metadata=metadata,
+                user_id=user_id
+            )
+            
+            if r2_key:
+                logger.info(f"✅ HTML project page saved to R2 storage: {r2_key}")
+            else:
+                logger.warning("⚠️ Failed to save HTML project page to R2 storage")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to generate/save HTML project page for job {job_id}: {e}")
+    
+    def _extract_title_from_notes(self, notes_content: str) -> Optional[str]:
+        """Extract title from notes content"""
+        if not notes_content:
+            return None
+        
+        lines = notes_content.split('\n')
+        for line in lines:
+            line = line.strip()
+            if line.startswith('# '):
+                return line[2:].strip()
+            elif line.startswith('## ') and not line.startswith('### '):
+                return line[3:].strip()
+        
+        # Fallback: use first non-empty line
+        for line in lines:
+            line = line.strip()
+            if line and not line.startswith('#'):
+                return line[:50] + ('...' if len(line) > 50 else '')
+        
+        return None
+    
+    async def _save_pdf_html_project_page(self, job_id: str, structured_notes: str, extracted_text: str, user_id: Optional[str] = None):
+        """Generate and save HTML project page for PDF processing to R2 storage"""
+        try:
+            if not r2_storage.is_available():
+                logger.info("R2 storage not available, skipping PDF HTML project page generation")
+                return
+            
+            # Import HTML generator
+            from html_generator import html_generator
+            
+            # Create mock job data for PDF processing (similar to video processing)
+            job_data = job_manager.get_job_status(job_id)
+            if not job_data:
+                logger.warning(f"Job data not found for PDF HTML generation: {job_id}")
+                return
+            
+            # Update job data with PDF-specific information
+            job_data.update({
+                "transcription": extracted_text,
+                "language": "PDF",
+                "segments_count": 1,  # PDFs don't have segments
+                "has_notes": bool(structured_notes),
+                "has_timestamped_notes": False,  # PDFs don't have timestamps
+                "timestamp_coverage": 0,
+                "mapped_sections": 0
+            })
+            
+            # Generate HTML content
+            loop = asyncio.get_event_loop()
+            html_content = await loop.run_in_executor(
+                executor,
+                html_generator.generate_project_html,
+                job_id,
+                job_data,
+                user_id
+            )
+            
+            if not html_content:
+                logger.warning(f"Failed to generate PDF HTML content for job {job_id}")
+                return
+            
+            # Extract title for the project
+            title = self._extract_title_from_notes(structured_notes) or "Quickmaps PDF Notes"
+            
+            # Prepare metadata
+            metadata = {
+                "job_id": job_id,
+                "user_id": user_id,
+                "processing_date": datetime.now().isoformat(),
+                "file_type": "pdf_project_html",
+                "language": "PDF",
+                "text_length": len(extracted_text),
+                "has_notes": bool(structured_notes),
+                "content_length": len(html_content),
+                "source_type": "pdf"
+            }
+            
+            # Save HTML project page to R2
+            r2_key = r2_storage.save_project_html(
+                job_id=job_id,
+                html_content=html_content,
+                title=title,
+                metadata=metadata,
+                user_id=user_id
+            )
+            
+            if r2_key:
+                logger.info(f"✅ PDF HTML project page saved to R2 storage: {r2_key}")
+            else:
+                logger.warning("⚠️ Failed to save PDF HTML project page to R2 storage")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to generate/save PDF HTML project page for job {job_id}: {e}")
 
 # Global instance - will be initialized with db in main.py
 processing_service = ProcessingService()
