@@ -196,6 +196,26 @@ async def startup_event():
 
     logger.info("✅ Application startup complete!")
 
+# Health check and CORS test endpoints
+@app.get("/health")
+async def health_check():
+    """Health check endpoint"""
+    return {
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "server": "quickmaps-backend",
+        "version": "1.1.0"
+    }
+
+@app.get("/api/cors-test")
+async def cors_test():
+    """Simple endpoint to test CORS configuration"""
+    return {
+        "message": "CORS is working!",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "server": "quickmaps-backend"
+    }
+
 # Initialize Firebase Admin SDK
 try:
     # Try to initialize with default credentials (for production)
@@ -361,6 +381,9 @@ app.add_middleware(
 logger.info(f"🌐 CORS configured with origins: {allowed_origins}")
 logger.info(f"🌐 CORS methods: {CORS_METHODS}")
 logger.info(f"🌐 CORS headers: {CORS_HEADERS}")
+logger.info(f"🌐 CORS configured_origins from config: {configured_origins}")
+logger.info(f"🌐 CORS extra_origins: {extra_origins}")
+logger.info(f"🌐 CORS allow_credentials: True")
 
 # Capture ?ref=... and set cookie
 app.add_middleware(AffiliateAttributionMiddleware)
@@ -405,9 +428,11 @@ async def download_youtube(
     request: Request = None,
 ):
     """Download video from YouTube URL and transcribe it"""
+    logger.info(f"🎬 YouTube download request received: {url}")
     
     # Extract user information from Firebase token
     user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+    logger.info(f"👤 User info: {user_id}, {user_email}")
     
     # Only check if user has credits (don't deduct yet)
     if user_id and db:
