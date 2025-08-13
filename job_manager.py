@@ -5,11 +5,8 @@ Handles job status tracking and management for background tasks.
 """
 
 import logging
-import json
-import os
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
-from pathlib import Path
 import uuid
 
 logger = logging.getLogger(__name__)
@@ -17,34 +14,8 @@ logger = logging.getLogger(__name__)
 class JobManager:
     """Service for managing background job status and tracking"""
     
-    def __init__(self, persistence_file: str = "jobs.json"):
+    def __init__(self):
         self.job_status: Dict[str, Dict[str, Any]] = {}
-        self.persistence_file = Path(persistence_file)
-        self._load_jobs_from_disk()
-    
-    def _load_jobs_from_disk(self):
-        """Load jobs from disk on startup"""
-        try:
-            if self.persistence_file.exists():
-                with open(self.persistence_file, 'r') as f:
-                    self.job_status = json.load(f)
-                logger.info(f"Loaded {len(self.job_status)} jobs from disk")
-            else:
-                logger.info("No existing jobs file found, starting fresh")
-        except Exception as e:
-            logger.error(f"Failed to load jobs from disk: {e}")
-            self.job_status = {}
-    
-    def _save_jobs_to_disk(self):
-        """Save jobs to disk for persistence"""
-        try:
-            # Create directory if it doesn't exist
-            self.persistence_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(self.persistence_file, 'w') as f:
-                json.dump(self.job_status, f, indent=2)
-        except Exception as e:
-            logger.error(f"Failed to save jobs to disk: {e}")
     
     def create_job(self, user_id: Optional[str] = None, user_email: Optional[str] = None, 
                    user_name: Optional[str] = None, action_type: Optional[str] = None,
@@ -76,7 +47,6 @@ class JobManager:
             "updated_at": datetime.now(timezone.utc).isoformat()
         }
         logger.info(f"Created job {job_id} with action_type: {action_type}")
-        self._save_jobs_to_disk()
         return job_id
     
     def update_job_status(self, job_id: str, status: str, progress: Optional[str] = None, 
@@ -103,8 +73,6 @@ class JobManager:
         # Update additional fields
         for key, value in kwargs.items():
             self.job_status[job_id][key] = value
-        
-        self._save_jobs_to_disk()
     
     def update_job_progress(self, job_id: str, progress: str) -> None:
         """
@@ -120,7 +88,6 @@ class JobManager:
         
         self.job_status[job_id]["progress"] = progress
         self.job_status[job_id]["updated_at"] = datetime.now(timezone.utc).isoformat()
-        self._save_jobs_to_disk()
     
     def set_job_completed(self, job_id: str, result_data: Dict[str, Any]) -> None:
         """
@@ -139,7 +106,6 @@ class JobManager:
             "updated_at": datetime.now(timezone.utc).isoformat(),
             **result_data
         })
-        self._save_jobs_to_disk()
     
     def set_job_error(self, job_id: str, error: str) -> None:
         """
@@ -158,7 +124,6 @@ class JobManager:
             "error": error,
             "updated_at": datetime.now(timezone.utc).isoformat()
         })
-        self._save_jobs_to_disk()
     
     def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -185,37 +150,7 @@ class JobManager:
         Returns:
             bool: True if job exists
         """
-        exists_in_memory = job_id in self.job_status
-        
-        # If not in memory, check if output files exist (for recovery)
-        if not exists_in_memory:
-            from config import OUTPUT_DIR
-            output_files = [
-                OUTPUT_DIR / f"{job_id}_transcription.txt",
-                OUTPUT_DIR / f"{job_id}_notes.txt",
-                OUTPUT_DIR / f"{job_id}_notes.md"
-            ]
-            
-            # If any output file exists, the job existed at some point
-            if any(f.exists() for f in output_files):
-                logger.info(f"Job {job_id} found via output files, recovering...")
-                # Create a basic job entry for recovery
-                self.job_status[job_id] = {
-                    "status": "completed",
-                    "progress": "Job recovered from output files",
-                    "user_id": None,
-                    "user_email": None,
-                    "user_name": None,
-                    "credits_deducted": True,  # Assume credits were deducted
-                    "action_type": "RECOVERED",
-                    "workspace_id": None,
-                    "created_at": datetime.now(timezone.utc).isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat()
-                }
-                self._save_jobs_to_disk()
-                return True
-        
-        return exists_in_memory
+        return job_id in self.job_status
     
     def cleanup_old_jobs(self, max_age_hours: int = 24) -> int:
         """
@@ -246,7 +181,6 @@ class JobManager:
         
         if jobs_to_remove:
             logger.info(f"Cleaned up {len(jobs_to_remove)} old jobs")
-            self._save_jobs_to_disk()
         
         return len(jobs_to_remove)
     
@@ -266,5 +200,5 @@ class JobManager:
                 user_jobs[job_id] = job_data
         return user_jobs
 
-# Global instance with persistence
-job_manager = JobManager("data/jobs.json")
+# Global instance
+job_manager = JobManager()

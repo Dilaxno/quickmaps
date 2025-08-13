@@ -7,7 +7,6 @@ between different services for video transcription, PDF processing, and more.
 
 import os
 import shutil
-import time
 from pathlib import Path
 from typing import Optional, Dict, Union
 import uuid
@@ -177,48 +176,7 @@ async def startup_event():
     except Exception as e:
         logger.error(f"Failed to start affiliate recompute scheduler: {e}")
 
-    # Log job manager status and cleanup old jobs
-    try:
-        job_count = len(job_manager.job_status)
-        logger.info(f"💼 Job manager initialized with {job_count} existing jobs")
-        
-        # Cleanup jobs older than 7 days on startup
-        cleaned_count = job_manager.cleanup_old_jobs(max_age_hours=7*24)
-        if cleaned_count > 0:
-            logger.info(f"🧹 Cleaned up {cleaned_count} old jobs")
-        
-        # Show recent jobs for debugging
-        remaining_count = len(job_manager.job_status)
-        if remaining_count > 0:
-            recent_jobs = list(job_manager.job_status.keys())[-5:]  # Show last 5 jobs
-            logger.info(f"📋 {remaining_count} jobs remaining, recent: {recent_jobs}")
-    except Exception as e:
-        logger.error(f"❌ Error checking job manager status: {e}")
-
     logger.info("✅ Application startup complete!")
-
-# Health check and CORS test endpoints
-@app.get("/health")
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "server": "quickmaps-backend",
-        "version": "1.1.0"
-    }
-
-@app.get("/api/cors-test")
-async def cors_test(request: Request):
-    """Simple endpoint to test CORS configuration"""
-    return {
-        "message": "CORS is working!",
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-        "server": "quickmaps-backend",
-        "origin": request.headers.get("origin"),
-        "user_agent": request.headers.get("user-agent"),
-        "headers": dict(request.headers)
-    }
 
 # Initialize Firebase Admin SDK
 try:
@@ -385,22 +343,6 @@ app.add_middleware(
 logger.info(f"🌐 CORS configured with origins: {allowed_origins}")
 logger.info(f"🌐 CORS methods: {CORS_METHODS}")
 logger.info(f"🌐 CORS headers: {CORS_HEADERS}")
-logger.info(f"🌐 CORS configured_origins from config: {configured_origins}")
-logger.info(f"🌐 CORS extra_origins: {extra_origins}")
-logger.info(f"🌐 CORS allow_credentials: True")
-
-# Add middleware to log all requests for debugging
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    logger.info(f"🌐 {request.method} {request.url} - Origin: {request.headers.get('origin', 'None')}")
-    
-    response = await call_next(request)
-    
-    process_time = time.time() - start_time
-    logger.info(f"🌐 Response: {response.status_code} - Time: {process_time:.3f}s")
-    
-    return response
 
 # Capture ?ref=... and set cookie
 app.add_middleware(AffiliateAttributionMiddleware)
@@ -445,11 +387,9 @@ async def download_youtube(
     request: Request = None,
 ):
     """Download video from YouTube URL and transcribe it"""
-    logger.info(f"🎬 YouTube download request received: {url}")
     
     # Extract user information from Firebase token
     user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
-    logger.info(f"👤 User info: {user_id}, {user_email}")
     
     # Only check if user has credits (don't deduct yet)
     if user_id and db:
@@ -724,32 +664,23 @@ async def upload_audio(
 @app.get("/status/{job_id}")
 async def get_job_status(job_id: str):
     """Get the status of a processing job"""
-    logger.info(f"🔍 Getting status for job: {job_id}")
+    job_data = job_manager.get_job_status(job_id)
     
-    try:
-        job_data = job_manager.get_job_status(job_id)
-        
-        if not job_data:
-            logger.warning(f"❌ Job not found: {job_id}")
-            # List available jobs for debugging
-            available_jobs = list(job_manager.job_status.keys())
-            logger.info(f"📋 Available jobs: {available_jobs[:10]}...")  # Show first 10
-            raise HTTPException(status_code=404, detail="Job not found")
-        
-        logger.info(f"✅ Job {job_id} status: {job_data.get('status', 'unknown')}")
-        return job_data
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"❌ Error getting job status for {job_id}: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return job_data
 
 # Alternative endpoint for backward compatibility
 @app.get("/job-status/{job_id}")
 async def get_job_status_alt(job_id: str):
     """Get the status of a processing job (alternative endpoint)"""
-    return await get_job_status(job_id)
+    job_data = job_manager.get_job_status(job_id)
+    
+    if not job_data:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return job_data
 
 # Download transcription endpoint
 @app.get("/download-transcription/{job_id}")
