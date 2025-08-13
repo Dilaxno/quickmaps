@@ -441,105 +441,10 @@ class ProcessingService:
                 logger.error(f"❌ R2 storage error: {e}")
     
     async def _create_auto_bookmarks(self, job_id: str, structured_notes: str, user_id: str):
-        """Automatically create bookmarks for important sections of the notes"""
-        try:
-            import re
-            
-            # Parse the structured notes to find important sections
-            sections_to_bookmark = []
-            
-            # Split notes into sections (assuming markdown format)
-            lines = structured_notes.split('\n')
-            current_section = None
-            current_content = []
-            
-            for line in lines:
-                # Check for headers (markdown format)
-                if line.startswith('#'):
-                    # Save previous section if it exists
-                    if current_section and current_content:
-                        content = '\n'.join(current_content).strip()
-                        if content and len(content) > 50:  # Only bookmark substantial content
-                            sections_to_bookmark.append({
-                                'title': current_section,
-                                'content': content[:500],  # Limit content length
-                                'section_type': 'auto-generated'
-                            })
-                    
-                    # Start new section
-                    current_section = line.strip('#').strip()
-                    current_content = []
-                else:
-                    if line.strip():  # Only add non-empty lines
-                        current_content.append(line)
-            
-            # Don't forget the last section
-            if current_section and current_content:
-                content = '\n'.join(current_content).strip()
-                if content and len(content) > 50:
-                    sections_to_bookmark.append({
-                        'title': current_section,
-                        'content': content[:500],
-                        'section_type': 'auto-generated'
-                    })
-            
-            # If no clear sections found, create bookmarks for key concepts
-            if not sections_to_bookmark:
-                # Look for bullet points or numbered lists that might be key concepts
-                key_concepts = []
-                for line in lines:
-                    line = line.strip()
-                    if (line.startswith('•') or line.startswith('-') or line.startswith('*') or 
-                        re.match(r'^\d+\.', line)) and len(line) > 30:
-                        key_concepts.append(line)
-                
-                # Group key concepts into bookmarks (max 5 concepts per bookmark)
-                for i in range(0, len(key_concepts), 5):
-                    concept_group = key_concepts[i:i+5]
-                    if concept_group:
-                        sections_to_bookmark.append({
-                            'title': f'Key Concepts {i//5 + 1}',
-                            'content': '\n'.join(concept_group),
-                            'section_type': 'key-concepts'
-                        })
-            
-            # Limit to maximum 10 auto-bookmarks to avoid overwhelming the user
-            sections_to_bookmark = sections_to_bookmark[:10]
-            
-            # Create bookmarks using the r2_storage service
-            bookmarks_created = 0
-            for section in sections_to_bookmark:
-                try:
-                    section_id = f"auto_{job_id}_{bookmarks_created}"
-                    metadata = {
-                        'section_type': section['section_type'],
-                        'auto_generated': True,
-                        'created_from': 'video_processing'
-                    }
-                    
-                    bookmark_key = r2_storage.save_bookmark(
-                        user_id=user_id,
-                        job_id=job_id,
-                        section_id=section_id,
-                        title=section['title'],
-                        content=section['content'],
-                        metadata=metadata
-                    )
-                    
-                    if bookmark_key:
-                        bookmarks_created += 1
-                        logger.info(f"✅ Auto-bookmark created: {section['title'][:50]}...")
-                    
-                except Exception as e:
-                    logger.error(f"❌ Failed to create bookmark for section '{section['title']}': {e}")
-            
-            if bookmarks_created > 0:
-                logger.info(f"✅ Created {bookmarks_created} auto-bookmarks for job {job_id}")
-            else:
-                logger.info(f"ℹ️ No auto-bookmarks created for job {job_id}")
-                
-        except Exception as e:
-            logger.error(f"❌ Failed to create auto-bookmarks for job {job_id}: {e}")
+        """Auto-bookmarking disabled - bookmarks should only be created when users manually bookmark sections"""
+        # Note: Auto-bookmarking has been disabled to ensure bookmarks are intentional user actions
+        # rather than automatic system behavior. Users can manually bookmark sections they find important.
+        logger.info(f"ℹ️ Auto-bookmarking disabled for job {job_id} - bookmarks will be created only when users manually bookmark sections")
     
     async def _increment_user_statistics(self, user_id: str, stats_updates: dict):
         """Helper function to increment user statistics without blocking main processing"""
