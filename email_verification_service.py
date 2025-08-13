@@ -85,8 +85,7 @@ class EmailVerificationService:
                     padding: 36px 30px;
                     position: relative;
                 }}
-                .logo {{ margin-bottom: 16px; }}
-                .logo img {{ height: 48px; width: auto; max-width: 200px; }}
+
                 .brand-title {{ font-size: 28px; font-weight: 800; margin: 8px 0 0 0; letter-spacing: 0.2px; text-shadow: 0 2px 4px rgba(0,0,0,0.12); }}
                 .tagline {{ font-size: 14px; opacity: 0.95; margin: 6px 0 0 0; }}
                 .content {{ padding: 32px 30px; }}
@@ -110,7 +109,7 @@ class EmailVerificationService:
                     display: inline-block;
                     background: #090040;
                     color: #ffffff !important;
-                    text-decoration: none;
+                    text-decoration: none !important;
                     padding: 14px 28px;
                     border-radius: 10px;
                     font-weight: 700;
@@ -118,6 +117,10 @@ class EmailVerificationService:
                     box-shadow: 0 6px 18px rgba(9, 0, 64, 0.25);
                     transition: all 0.25s ease;
                     border: 1px solid rgba(255,255,255,0.3);
+                }}
+                .button * {{
+                    color: #ffffff !important;
+                    text-decoration: none !important;
                 }}
                 .button:hover {{ transform: translateY(-2px); box-shadow: 0 10px 24px rgba(9, 0, 64, 0.35); }}
                 .note {{ font-size: 12px; color: #6b7280; text-align: center; margin-top: 12px; }}
@@ -129,7 +132,6 @@ class EmailVerificationService:
         <body>
             <div class="container">
                 <div class="header">
-                    <div class="logo"><img src="{frontend_url}/logo.svg" alt="QuickMaps logo" /></div>
                     <div class="brand-title">QuickMaps</div>
                     <p class="tagline">AI-powered visual notes and mind maps</p>
                 </div>
