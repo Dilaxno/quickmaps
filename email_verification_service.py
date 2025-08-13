@@ -45,15 +45,74 @@ class EmailVerificationService:
         <head>
             <meta charset=\"UTF-8\">
             <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-            <title>Verify your email</title>
+            <title>Verify your email - QuickMaps</title>
+            <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">
+            <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>
+            <link href=\"https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap\" rel=\"stylesheet\">
             <style>
-                body {{ font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0b1020; color: #e5e7eb; margin: 0; padding: 0; }}
-                .container {{ max-width: 600px; margin: 0 auto; padding: 32px 20px; }}
-                .card {{ background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); border-radius: 16px; padding: 28px; }}
-                .title {{ font-size: 22px; font-weight: 800; margin: 0 0 8px 0; }}
-                .subtitle {{ color: #9ca3af; margin: 0 0 20px 0; }}
-                .code {{ font-size: 36px; font-weight: 800; letter-spacing: 8px; background: rgba(255,255,255,0.08); padding: 16px 20px; border-radius: 12px; text-align: center; border: 1px dashed rgba(255,255,255,0.16); }}
-                .footer {{ color: #9ca3af; font-size: 12px; margin-top: 18px; }}
+                /* Enterprise brand: deep navy (#090040) gradient */
+                body {
+                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                    margin: 0;
+                    padding: 20px;
+                    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+                    color: #111827;
+                    line-height: 1.6;
+                }
+                .container {
+                    max-width: 600px;
+                    margin: 0 auto;
+                    background: #ffffff;
+                    border-radius: 16px;
+                    overflow: hidden;
+                    box-shadow: 0 10px 30px rgba(9, 0, 64, 0.12);
+                }
+                .header {
+                    background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
+                    color: #ffffff;
+                    text-align: center;
+                    padding: 36px 30px;
+                    position: relative;
+                }
+                .logo { margin-bottom: 16px; }
+                .logo img { height: 48px; width: auto; max-width: 200px; }
+                .brand-title { font-size: 28px; font-weight: 800; margin: 8px 0 0 0; letter-spacing: 0.2px; text-shadow: 0 2px 4px rgba(0,0,0,0.12); }
+                .tagline { font-size: 14px; opacity: 0.95; margin: 6px 0 0 0; }
+                .content { padding: 32px 30px; }
+                .greeting { font-size: 20px; font-weight: 700; color: #090040; margin: 0 0 12px 0; }
+                .subtitle { color: #495057; margin: 0 0 24px 0; }
+                .code-box {
+                    display: block;
+                    font-size: 36px;
+                    font-weight: 800;
+                    letter-spacing: 8px;
+                    background: #f8fafc;
+                    color: #090040;
+                    padding: 18px 22px;
+                    border-radius: 12px;
+                    text-align: center;
+                    border: 2px dashed rgba(9, 0, 64, 0.25);
+                    box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+                }
+                .button-container { text-align: center; margin: 28px 0 8px 0; }
+                .button {
+                    display: inline-block;
+                    background: #090040;
+                    color: #ffffff !important;
+                    text-decoration: none;
+                    padding: 14px 28px;
+                    border-radius: 10px;
+                    font-weight: 700;
+                    font-size: 14px;
+                    box-shadow: 0 6px 18px rgba(9, 0, 64, 0.25);
+                    transition: all 0.25s ease;
+                    border: 1px solid rgba(255,255,255,0.3);
+                }
+                .button:hover { transform: translateY(-2px); box-shadow: 0 10px 24px rgba(9, 0, 64, 0.35); }
+                .note { font-size: 12px; color: #6b7280; text-align: center; margin-top: 12px; }
+                .divider { height: 1px; background: #e5e7eb; margin: 28px 0; }
+                .footer { background: linear-gradient(135deg, #f9fafb 0%, #f1f5f9 100%); padding: 22px 28px; text-align: center; color: #6b7280; font-size: 12px; }
+                .footer a { color: #090040; text-decoration: none; font-weight: 600; }
             </style>
         </head>
         <body>

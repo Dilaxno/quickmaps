@@ -58,6 +58,7 @@ from auth_service import auth_service
 from job_manager import job_manager
 from file_utils import file_utils
 from processing_service import processing_service
+from affiliate_recompute_job import start_affiliate_recompute_scheduler, stop_affiliate_recompute_scheduler
 
 # Setup logging
 logging.basicConfig(level=getattr(logging, LOG_LEVEL), format=LOG_FORMAT)
@@ -94,6 +95,13 @@ app = FastAPI(title="Quickmaps Backend", version="1.1.0")
 # Add validation exception handler
 from fastapi.exceptions import RequestValidationError
 from pydantic import ValidationError
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    try:
+        stop_affiliate_recompute_scheduler(logger)
+    except Exception:
+        pass
 
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -145,6 +153,16 @@ async def startup_event():
         logger.warning(f"⚠️ TTS service initialization failed: {e}")
         logger.info("TTS service will be initialized on first use")
     
+    # Start periodic affiliate totals recompute scheduler (every 6 hours by default)
+    try:
+        if db:
+            start_affiliate_recompute_scheduler(logger, db, interval_seconds=int(os.getenv('AFFILIATE_RECOMPUTE_INTERVAL_SEC', str(6*60*60))))
+            logger.info("🗓️ Affiliate totals recompute scheduler started")
+        else:
+            logger.warning("Skipping affiliate recompute scheduler: no DB")
+    except Exception as e:
+        logger.error(f"Failed to start affiliate recompute scheduler: {e}")
+
     logger.info("✅ Application startup complete!")
 
 # Initialize Firebase Admin SDK
