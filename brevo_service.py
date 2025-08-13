@@ -953,11 +953,13 @@ class BrevoEmailService:
             return False
         
         try:
+            logger.info(f"🔧 Preparing OTP email for {user_email} with code {otp_code}")
             verification_url = f"{self.frontend_url}/verify-email?email={user_email}&code={otp_code}"
             subject = "✅ Verify your email - QuickMaps"
             current_year = datetime.now().year
+            logger.info(f"🔧 Variables prepared: url={verification_url}, year={current_year}")
             
-            html_content = f"""
+            html_template = """
             <!DOCTYPE html>
             <html lang="en">
             <head>
@@ -968,55 +970,55 @@ class BrevoEmailService:
                 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
                 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
                 <style>
-                    body {{
+                    body {
                         font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                         margin: 0;
                         padding: 20px;
                         background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
                         color: #111827;
                         line-height: 1.6;
-                    }}
-                    .container {{
+                    }
+                    .container {
                         max-width: 600px;
                         margin: 0 auto;
                         background: #ffffff;
                         border-radius: 16px;
                         overflow: hidden;
                         box-shadow: 0 10px 30px rgba(9, 0, 64, 0.12);
-                    }}
-                    .header {{
+                    }
+                    .header {
                         background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
                         color: #ffffff;
                         text-align: center;
                         padding: 36px 30px;
                         position: relative;
-                    }}
-                    .brand {{
+                    }
+                    .brand {
                         font-size: 28px;
                         font-weight: 800;
                         margin: 8px 0 0 0;
                         letter-spacing: 0.2px;
                         text-shadow: 0 2px 4px rgba(0,0,0,0.12);
-                    }}
-                    .tagline {{
+                    }
+                    .tagline {
                         font-size: 14px;
                         opacity: 0.95;
                         margin: 6px 0 0 0;
-                    }}
-                    .content {{
+                    }
+                    .content {
                         padding: 32px 30px;
-                    }}
-                    .greeting {{
+                    }
+                    .greeting {
                         font-size: 20px;
                         font-weight: 700;
                         color: #090040;
                         margin: 0 0 12px 0;
-                    }}
-                    .subtitle {{
+                    }
+                    .subtitle {
                         color: #495057;
                         margin: 0 0 24px 0;
-                    }}
-                    .code-box {{
+                    }
+                    .code-box {
                         display: block;
                         font-size: 36px;
                         font-weight: 800;
@@ -1029,12 +1031,12 @@ class BrevoEmailService:
                         border: 2px dashed rgba(9, 0, 64, 0.25);
                         box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
                         margin: 20px 0;
-                    }}
-                    .button-container {{
+                    }
+                    .button-container {
                         text-align: center;
                         margin: 28px 0 8px 0;
-                    }}
-                    .button {{
+                    }
+                    .button {
                         display: inline-block;
                         background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
                         color: #ffffff !important;
@@ -1045,34 +1047,34 @@ class BrevoEmailService:
                         font-size: 14px;
                         box-shadow: 0 6px 18px rgba(9, 0, 64, 0.25);
                         transition: all 0.25s ease;
-                    }}
-                    .button:hover {{
+                    }
+                    .button:hover {
                         transform: translateY(-2px);
                         box-shadow: 0 10px 24px rgba(9, 0, 64, 0.35);
-                    }}
-                    .note {{
+                    }
+                    .note {
                         font-size: 12px;
                         color: #6b7280;
                         text-align: center;
                         margin-top: 12px;
-                    }}
-                    .divider {{
+                    }
+                    .divider {
                         height: 1px;
                         background: #e5e7eb;
                         margin: 28px 0;
-                    }}
-                    .footer {{
+                    }
+                    .footer {
                         background: linear-gradient(135deg, #f9fafb 0%, #f1f5f9 100%);
                         padding: 22px 28px;
                         text-align: center;
                         color: #6b7280;
                         font-size: 12px;
-                    }}
-                    .footer a {{
+                    }
+                    .footer a {
                         color: #090040;
                         text-decoration: none;
                         font-weight: 600;
-                    }}
+                    }
                 </style>
             </head>
             <body>
@@ -1099,8 +1101,16 @@ class BrevoEmailService:
             </body>
             </html>
             """
+            
+            html_content = html_template.format(
+                user_name=user_name,
+                otp_code=otp_code,
+                verification_url=verification_url,
+                expiry_minutes=expiry_minutes,
+                current_year=current_year
+            )
 
-            text_content = f"""
+            text_template = """
             QuickMaps - Email Verification
             
             Hi {user_name},
@@ -1120,24 +1130,33 @@ class BrevoEmailService:
             The QuickMaps Team
             https://quickmaps.pro
             """
+            
+            text_content = text_template.format(
+                user_name=user_name,
+                otp_code=otp_code,
+                verification_url=verification_url,
+                expiry_minutes=expiry_minutes
+            )
 
             # Prepare email data
-            email_data = {{
-                "sender": {{
+            logger.info(f"🔧 Preparing email data structure...")
+            email_data = {
+                "sender": {
                     "name": self.sender_name,
                     "email": self.sender_email
-                }},
+                },
                 "to": [
-                    {{
+                    {
                         "email": user_email,
                         "name": user_name
-                    }}
+                    }
                 ],
                 "subject": subject,
                 "htmlContent": html_content,
                 "textContent": text_content,
                 "tags": ["email-verification", "otp", "authentication"]
-            }}
+            }
+            logger.info(f"🔧 Email data prepared successfully")
             
             # Send email
             response = requests.post(
