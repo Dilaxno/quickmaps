@@ -1520,14 +1520,9 @@ async def delete_bookmark(
     try:
         # Extract user information
         user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
-        logger.info(f"🗑️ Deleting bookmark: {bookmark_id} for user: {user_id}")
+        logger.info(f"🗑️ Attempting to delete bookmark: {bookmark_id} for user: {user_id}")
         
-        # Check if bookmark exists first to avoid unnecessary operations
-        if not r2_storage.bookmark_exists(user_id=user_id, bookmark_id=bookmark_id):
-            logger.debug(f"Bookmark not found: {bookmark_id} (user: {user_id})")
-            raise HTTPException(status_code=404, detail="Bookmark not found")
-        
-        # Delete bookmark from R2 storage
+        # First, try to delete the bookmark directly (this will handle both existence check and deletion)
         success = r2_storage.delete_bookmark(user_id=user_id, bookmark_id=bookmark_id)
         
         if success:
@@ -1538,15 +1533,74 @@ async def delete_bookmark(
                 "message": "Bookmark deleted successfully"
             }
         else:
-            # Log as debug instead of warning for not found bookmarks (common scenario)
-            logger.debug(f"Bookmark not found for deletion: {bookmark_id} (user: {user_id})")
-            raise HTTPException(status_code=404, detail="Bookmark not found")
+            # Bookmark not found - this could be because:
+            # 1. It was already deleted
+            # 2. It was created with old auto-bookmark system
+            # 3. It doesn't belong to this user
+            logger.info(f"📝 Bookmark not found for deletion: {bookmark_id} (user: {user_id})")
+            
+            # For better UX, return success even if bookmark wasn't found
+            # This prevents errors when users try to delete the same bookmark multiple times
+            return {
+                "status": "success",
+                "success": True,
+                "message": "Bookmark already deleted or not found"
+            }
         
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"❌ Error deleting bookmark: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete bookmark: {str(e)}")
+
+@app.delete("/api/bookmarks/cleanup/auto-generated")
+async def cleanup_auto_generated_bookmarks(
+    request: Request = None
+):
+    """Clean up old auto-generated bookmarks that may be causing issues"""
+    try:
+        # Extract user information
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        logger.info(f"🧹 Cleaning up auto-generated bookmarks for user: {user_id}")
+        
+        # Get all user bookmarks
+        bookmarks = r2_storage.get_user_bookmarks(user_id=user_id, limit=1000)
+        
+        deleted_count = 0
+        auto_generated_bookmarks = []
+        
+        # Find auto-generated bookmarks
+        for bookmark in bookmarks:
+            metadata = bookmark.get('metadata', {})
+            if (metadata.get('auto_generated') == True or 
+                metadata.get('created_from') == 'video_processing' or
+                bookmark.get('bookmark_id', '').startswith('auto_')):
+                auto_generated_bookmarks.append(bookmark)
+        
+        # Delete auto-generated bookmarks
+        for bookmark in auto_generated_bookmarks:
+            bookmark_id = bookmark.get('bookmark_id')
+            if bookmark_id:
+                success = r2_storage.delete_bookmark(user_id=user_id, bookmark_id=bookmark_id)
+                if success:
+                    deleted_count += 1
+                    logger.info(f"🗑️ Deleted auto-generated bookmark: {bookmark_id}")
+        
+        logger.info(f"✅ Cleanup completed: {deleted_count} auto-generated bookmarks deleted")
+        
+        return {
+            "status": "success",
+            "success": True,
+            "deleted_count": deleted_count,
+            "total_auto_generated": len(auto_generated_bookmarks),
+            "message": f"Cleaned up {deleted_count} auto-generated bookmarks"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ Error cleaning up auto-generated bookmarks: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to cleanup bookmarks: {str(e)}")
 
 # Saved Notes endpoints
 @app.get("/api/saved-notes")

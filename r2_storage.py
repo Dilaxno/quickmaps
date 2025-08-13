@@ -552,6 +552,9 @@ class R2StorageService:
             # Find the bookmark by searching with prefix
             search_prefix = f"users/{user_id}/bookmarks/"
             found_bookmark = False
+            files_checked = 0
+            
+            logger.debug(f"🔍 Searching for bookmark {bookmark_id} with prefix: {search_prefix}")
             
             paginator = self.client.get_paginator('list_objects_v2')
             page_iterator = paginator.paginate(
@@ -562,8 +565,10 @@ class R2StorageService:
             for page in page_iterator:
                 if 'Contents' in page:
                     for obj in page['Contents']:
+                        files_checked += 1
                         # Check if bookmark_id is in the key (filename contains the ID)
                         if bookmark_id in obj['Key'] and obj['Key'].endswith('.json'):
+                            logger.debug(f"📄 Found potential bookmark file: {obj['Key']}")
                             # Verify it's the correct bookmark by checking content
                             try:
                                 response = self.client.get_object(Bucket=R2_BUCKET_NAME, Key=obj['Key'])
@@ -576,6 +581,8 @@ class R2StorageService:
                                     logger.info(f"✅ Deleted bookmark: {obj['Key']}")
                                     found_bookmark = True
                                     return True
+                                else:
+                                    logger.debug(f"📄 File contains different bookmark_id: {bookmark_data.get('bookmark_id')}")
                                     
                             except ClientError as e:
                                 error_code = e.response['Error']['Code']
@@ -593,7 +600,7 @@ class R2StorageService:
                                 continue
             
             if not found_bookmark:
-                logger.debug(f"Bookmark not found for deletion: {bookmark_id}")
+                logger.info(f"📝 Bookmark not found for deletion: {bookmark_id} (checked {files_checked} files)")
             
             return found_bookmark
             
