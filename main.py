@@ -3111,6 +3111,10 @@ async def test_send_email(request: Request):
             }
         else:
             raise HTTPException(status_code=500, detail="Failed to send email")
+                
+    except Exception as e:
+        logger.error(f"❌ Error sending test email: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send test email: {str(e)}")
 
 @app.post("/api/test/send-otp-email")
 async def test_send_otp_email(request: Request):
