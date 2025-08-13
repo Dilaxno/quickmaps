@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks, Request, Response
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from affiliate_attribution_middleware import AffiliateAttributionMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import uvicorn
@@ -37,6 +38,7 @@ from quiz_generator import quiz_generator
 from r2_storage import r2_storage
 from pdf_processor import pdf_processor
 from payment_service import PaymentService, PaymentResult
+from affiliate_service import AffiliateService
 from notification_service import NotificationService
 from device_service import device_service
 from brevo_service import brevo_service
@@ -49,6 +51,7 @@ from cloud_storage_service import cloud_storage_service
 from video_validation_service import video_validation_service
 
 # Import new utility services
+from routes import affiliate_routes
 from transcription_service import transcription_service
 from youtube_service import youtube_service
 from auth_service import auth_service
@@ -86,7 +89,7 @@ class TokenValidationRequest(BaseModel):
 class QuizEvaluationRequest(BaseModel):
     answers: Dict[str, str]  # question_id -> user_answer mapping
 
-app = FastAPI(title="Video Transcription API", version="1.0.0")
+app = FastAPI(title="Quickmaps Backend", version="1.1.0")
 
 # Add validation exception handler
 from fastapi.exceptions import RequestValidationError
@@ -188,7 +191,16 @@ except Exception as e:
 # Initialize payment and notification services
 payment_service = PaymentService(db_client=db)
 notification_service = NotificationService(db_client=db)
-logger.info("Payment and notification services initialized")
+affiliate_service = AffiliateService(db_client=db)
+logger.info("Payment, notification and affiliate services initialized")
+
+# Mount affiliate routes
+try:
+    affiliate_routes.init(db)
+    app.include_router(affiliate_routes.router)
+    logger.info("Affiliate routes mounted")
+except Exception as e:
+    logger.error(f"Failed to mount affiliate routes: {e}")
 
 # Initialize services with database
 credit_service.db = db
@@ -259,6 +271,27 @@ extra_origins = [
     "https://www.quickmaps.pro",
 ]
 
+# Add local development origins when not running in production
+if os.getenv("ENVIRONMENT", "").lower() not in ("prod", "production", "live"):
+    extra_origins += [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+    ]
+
+# Always allow extra origins from environment (comma-separated)
+extra_from_env = os.getenv("CORS_EXTRA_ORIGINS", "")
+if extra_from_env:
+    for origin in extra_from_env.split(","):
+        origin = origin.strip()
+        if origin:
+            extra_origins.append(origin)
+
 # When credentials are allowed, wildcard "*" is not permitted by browsers.
 # Remove "*" and use explicit origins.
 sanitized_origins = [o for o in configured_origins if o != "*"]
@@ -266,13 +299,16 @@ allowed_origins = sorted(set(sanitized_origins + extra_origins))
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins if allowed_origins else ["https://quickmaps.pro", "https://www.quickmaps.pro"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"] if CORS_METHODS == ["*"] else CORS_METHODS,
     allow_headers=["*"] if CORS_HEADERS == ["*"] else CORS_HEADERS,
     expose_headers=["Content-Disposition"],
     max_age=86400,
 )
+
+# Capture ?ref=... and set cookie
+app.add_middleware(AffiliateAttributionMiddleware)
 
 # Create directories for uploads and outputs
 for directory in [UPLOAD_DIR, OUTPUT_DIR, TEMP_DIR, STATIC_DIR]:
@@ -1826,6 +1862,69 @@ async def paddle_webhook(request: Request):
             await handle_payment_failed(webhook_data)
         else:
             logger.info(f"ℹ️ Unhandled webhook event type: {event_type}")
+
+        # Affiliate tracking for all relevant successful events
+        try:
+            if event_type in ['transaction.completed', 'subscription.activated'] and db:
+                data = webhook_data.get('data', {})
+                # Resolve user
+                user_id = None
+                subscription_id = data.get('subscription_id') or data.get('id')
+                customer = data.get('customer', {})
+                customer_email = customer.get('email')
+                customer_id = data.get('customer_id') or customer.get('id')
+
+                # Try to find user by subscription_id, email, or stored paddle_customer_id
+                if subscription_id:
+                    docs = list(db.collection('users').where('subscription_id', '==', subscription_id).limit(1).stream())
+                    if docs:
+                        user_id = docs[0].id
+                if not user_id and customer_email:
+                    docs = list(db.collection('users').where('email', '==', customer_email).limit(1).stream())
+                    if docs:
+                        user_id = docs[0].id
+                if not user_id and customer_id:
+                    docs = list(db.collection('users').where('paddle_customer_id', '==', customer_id).limit(1).stream())
+                    if docs:
+                        user_id = docs[0].id
+
+                if user_id:
+                    user_doc = db.collection('users').document(user_id).get()
+                    user_data = user_doc.to_dict() if user_doc.exists else {}
+                    affiliate_ref = user_data.get('affiliateRef') or user_data.get('affiliate_ref')
+                    if affiliate_ref:
+                        # Amount and currency
+                        totals = data.get('details', {}).get('totals', {})
+                        amount = totals.get('total')
+                        currency = (totals.get('currency') or 'USD').upper()
+                        try:
+                            amount_cents = int(round(float(amount))) if amount is not None else 0
+                        except Exception:
+                            amount_cents = 0
+
+                        # Plan and interval
+                        items = data.get('items', [])
+                        plan_id = None
+                        interval = None
+                        if items:
+                            first_item = items[0]
+                            plan_id = first_item.get('price', {}).get('id') or first_item.get('name')
+                            price_id_lower = (first_item.get('price', {}).get('id') or '').lower()
+                            interval = 'year' if 'year' in price_id_lower else 'month'
+
+                        payment_id = data.get('id') or webhook_data.get('event_id')
+                        affiliate_service.record_payment(
+                            payment_id=payment_id,
+                            user_id=user_id,
+                            amount_cents=amount_cents,
+                            currency=currency,
+                            affiliate_ref=affiliate_ref,
+                            plan_id=plan_id,
+                            interval=interval,
+                        )
+                        logger.info(f"✅ Recorded affiliate payment for user {user_id} ref={affiliate_ref} amount={amount_cents}")
+        except Exception as e:
+            logger.error(f"⚠️ Affiliate attribution error: {e}")
         
         logger.info(f"✅ Successfully processed Paddle webhook: {event_type}")
         
@@ -2349,7 +2448,8 @@ async def webhook_test():
     return {
         "status": "success",
         "message": "Webhook endpoint is accessible",
-        "timestamp": datetime.now().isoformat()
+        "timestamp": datetime.now().isoformat(),
+        "firebase_available": db is not None
     }
 
 @app.get("/api/user/refresh")
@@ -3025,7 +3125,7 @@ async def preview_welcome_email_template():
         raise HTTPException(status_code=500, detail=f"Failed to generate preview: {str(e)}")
 
 @app.post("/api/auth/register")
-async def register_user(user_data: RegisterUserRequest):
+async def register_user(user_data: RegisterUserRequest, request: Request):
     """Register a new user and send welcome email"""
     try:
         email = user_data.email
@@ -3087,13 +3187,22 @@ async def register_user(user_data: RegisterUserRequest):
         # Store user profile in Firestore (optional - credit service may have already done this)
         try:
             db = firestore.client()
+
+            # Capture affiliate ref from cookie or x-affiliate-ref header
+            affiliate_ref = None
+            try:
+                affiliate_ref = request.cookies.get('affiliate_ref') or request.headers.get('X-Affiliate-Ref')
+            except Exception:
+                affiliate_ref = None
+
             user_doc = {
                 'uid': user_record.uid,
                 'email': email,
                 'name': name or email.split('@')[0],
                 'created_at': datetime.now(),
                 'email_verified': False,
-                'profile_completed': False
+                'profile_completed': False,
+                'affiliateRef': affiliate_ref if affiliate_ref else None,
             }
             
             # Only set basic profile if credits weren't initialized (to avoid overwriting)
@@ -3102,10 +3211,13 @@ async def register_user(user_data: RegisterUserRequest):
                 logger.info(f"✅ User profile stored in Firestore: {user_record.uid}")
             else:
                 # Just update the additional fields
-                db.collection('users').document(user_record.uid).update({
+                update_data = {
                     'email_verified': False,
-                    'profile_completed': False
-                })
+                    'profile_completed': False,
+                }
+                if affiliate_ref:
+                    update_data['affiliateRef'] = affiliate_ref
+                db.collection('users').document(user_record.uid).update(update_data)
                 logger.info(f"✅ User profile updated in Firestore: {user_record.uid}")
         except Exception as e:
             logger.error(f"❌ Error storing user profile: {e}")
