@@ -935,5 +935,227 @@ class BrevoEmailService:
             logger.error(f"Error sending password reset email: {str(e)}")
             return False
 
+    def send_otp_verification_email(self, user_email: str, otp_code: str, user_name: str = "there", expiry_minutes: int = 10) -> bool:
+        """
+        Send OTP verification email via Brevo
+        
+        Args:
+            user_email: User's email address
+            otp_code: OTP verification code
+            user_name: User's display name
+            expiry_minutes: How long the OTP is valid for
+        
+        Returns:
+            bool: True if email sent successfully, False otherwise
+        """
+        if not self.is_configured():
+            logger.warning("Brevo not configured, skipping OTP verification email")
+            return False
+        
+        try:
+            verification_url = f"{self.frontend_url}/verify-email?email={user_email}&code={otp_code}"
+            subject = "✅ Verify your email - QuickMaps"
+            current_year = datetime.now().year
+            
+            html_content = f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Verify your email - QuickMaps</title>
+                <link rel="preconnect" href="https://fonts.googleapis.com">
+                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                <style>
+                    body {{
+                        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        margin: 0;
+                        padding: 20px;
+                        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+                        color: #111827;
+                        line-height: 1.6;
+                    }}
+                    .container {{
+                        max-width: 600px;
+                        margin: 0 auto;
+                        background: #ffffff;
+                        border-radius: 16px;
+                        overflow: hidden;
+                        box-shadow: 0 10px 30px rgba(9, 0, 64, 0.12);
+                    }}
+                    .header {{
+                        background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
+                        color: #ffffff;
+                        text-align: center;
+                        padding: 36px 30px;
+                        position: relative;
+                    }}
+                    .brand {{
+                        font-size: 28px;
+                        font-weight: 800;
+                        margin: 8px 0 0 0;
+                        letter-spacing: 0.2px;
+                        text-shadow: 0 2px 4px rgba(0,0,0,0.12);
+                    }}
+                    .tagline {{
+                        font-size: 14px;
+                        opacity: 0.95;
+                        margin: 6px 0 0 0;
+                    }}
+                    .content {{
+                        padding: 32px 30px;
+                    }}
+                    .greeting {{
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: #090040;
+                        margin: 0 0 12px 0;
+                    }}
+                    .subtitle {{
+                        color: #495057;
+                        margin: 0 0 24px 0;
+                    }}
+                    .code-box {{
+                        display: block;
+                        font-size: 36px;
+                        font-weight: 800;
+                        letter-spacing: 8px;
+                        background: #f8fafc;
+                        color: #090040;
+                        padding: 18px 22px;
+                        border-radius: 12px;
+                        text-align: center;
+                        border: 2px dashed rgba(9, 0, 64, 0.25);
+                        box-shadow: inset 0 1px 0 rgba(255,255,255,0.6);
+                        margin: 20px 0;
+                    }}
+                    .button-container {{
+                        text-align: center;
+                        margin: 28px 0 8px 0;
+                    }}
+                    .button {{
+                        display: inline-block;
+                        background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
+                        color: #ffffff !important;
+                        text-decoration: none !important;
+                        padding: 14px 28px;
+                        border-radius: 10px;
+                        font-weight: 700;
+                        font-size: 14px;
+                        box-shadow: 0 6px 18px rgba(9, 0, 64, 0.25);
+                        transition: all 0.25s ease;
+                    }}
+                    .button:hover {{
+                        transform: translateY(-2px);
+                        box-shadow: 0 10px 24px rgba(9, 0, 64, 0.35);
+                    }}
+                    .note {{
+                        font-size: 12px;
+                        color: #6b7280;
+                        text-align: center;
+                        margin-top: 12px;
+                    }}
+                    .divider {{
+                        height: 1px;
+                        background: #e5e7eb;
+                        margin: 28px 0;
+                    }}
+                    .footer {{
+                        background: linear-gradient(135deg, #f9fafb 0%, #f1f5f9 100%);
+                        padding: 22px 28px;
+                        text-align: center;
+                        color: #6b7280;
+                        font-size: 12px;
+                    }}
+                    .footer a {{
+                        color: #090040;
+                        text-decoration: none;
+                        font-weight: 600;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <div class="brand">QuickMaps</div>
+                        <p class="tagline">AI-powered visual notes and mind maps</p>
+                    </div>
+                    <div class="content">
+                        <p class="greeting">Hi {user_name},</p>
+                        <p class="subtitle">Welcome to QuickMaps! Please verify your email address to activate your account.</p>
+                        <div class="code-box">{otp_code}</div>
+                        <div class="button-container">
+                            <a href="{verification_url}" class="button">Verify Email Address</a>
+                        </div>
+                        <p class="note">This verification code expires in {expiry_minutes} minutes.</p>
+                        <div class="divider"></div>
+                        <p class="note">If you didn't create an account with QuickMaps, you can safely ignore this email.</p>
+                    </div>
+                    <div class="footer">
+                        <p>© {current_year} QuickMaps. All rights reserved. <a href="https://quickmaps.pro">https://quickmaps.pro</a></p>
+                    </div>
+                </div>
+            </body>
+            </html>
+            """
+
+            text_content = f"""
+            QuickMaps - Email Verification
+            
+            Hi {user_name},
+            
+            Welcome to QuickMaps! Please verify your email address to activate your account.
+            
+            Your verification code is: {otp_code}
+            
+            Click this link to verify your email:
+            {verification_url}
+            
+            This code expires in {expiry_minutes} minutes.
+            
+            If you didn't create an account with QuickMaps, you can safely ignore this email.
+            
+            Best regards,
+            The QuickMaps Team
+            https://quickmaps.pro
+            """
+
+            # Prepare email data
+            email_data = {{
+                "sender": {{
+                    "name": self.sender_name,
+                    "email": self.sender_email
+                }},
+                "to": [
+                    {{
+                        "email": user_email,
+                        "name": user_name
+                    }}
+                ],
+                "subject": subject,
+                "htmlContent": html_content,
+                "textContent": text_content,
+                "tags": ["email-verification", "otp", "authentication"]
+            }}
+            
+            # Send email
+            response = requests.post(
+                f"{self.base_url}/smtp/email",
+                headers=self._get_headers(),
+                json=email_data
+            )
+            
+            if response.status_code == 201:
+                logger.info(f"OTP verification email sent successfully to {user_email}")
+                return True
+            else:
+                logger.error(f"Failed to send OTP verification email: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error sending OTP verification email: {str(e)}")
+            return False
+
 # Global instance
 brevo_service = BrevoEmailService()

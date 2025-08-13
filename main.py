@@ -3111,10 +3111,37 @@ async def test_send_email(request: Request):
             }
         else:
             raise HTTPException(status_code=500, detail="Failed to send email")
+
+@app.post("/api/test/send-otp-email")
+async def test_send_otp_email(request: Request):
+    """Test OTP verification email sending"""
+    try:
+        body = await request.json()
+        test_email = body.get('email')
+        
+        if not test_email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        
+        logger.info(f"🧪 Testing OTP email send to: {test_email}")
+        
+        if not brevo_service.is_configured():
+            raise HTTPException(status_code=500, detail="Brevo service not configured")
+        
+        # Test with OTP verification email template
+        success = brevo_service.send_otp_verification_email(test_email, "123456", "Test User", 10)
+        
+        if success:
+            return {
+                "status": "success",
+                "message": f"OTP verification email sent successfully to {test_email}",
+                "note": "Check your email inbox for the QuickMaps OTP verification email!"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to send OTP email")
                 
     except Exception as e:
-        logger.error(f"❌ Error sending test email: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send test email: {str(e)}")
+        logger.error(f"❌ Error testing OTP email: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to send test OTP email: {str(e)}")
 
 @app.get("/api/test/email-preview")
 async def preview_email_template():
