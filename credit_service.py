@@ -24,10 +24,10 @@ class CreditAction(Enum):
 @dataclass
 class CreditCost:
     """Credit costs for different actions"""
-    VIDEO_UPLOAD = 1
-    YOUTUBE_DOWNLOAD = 1
-    PDF_UPLOAD = 1
-    QUIZ_GENERATION = 1
+    VIDEO_UPLOAD = 10
+    YOUTUBE_DOWNLOAD = 10
+    PDF_UPLOAD = 10
+    QUIZ_GENERATION = 10
 
 @dataclass
 class CreditCheckResult:
@@ -71,7 +71,7 @@ class CreditService:
                 # New user would get free trial credits, so they have credits
                 return CreditCheckResult(
                     has_credits=True,
-                    current_credits=10,  # Default trial credits
+                    current_credits=50,  # Default trial credits (5 generations at 10 credits each)
                     credits_needed=credits_needed,
                     message="New user with trial credits"
                 )
@@ -202,7 +202,7 @@ class CreditService:
             user_data = {
                 'user_id': user_id,
                 'plan': 'free',
-                'current_credits': 10,  # Free trial credits
+                'current_credits': 50,  # Free trial credits (5 generations at 10 credits each)
                 'credits_used': 0,
                 'total_mindmaps': 0,
                 'created_at': datetime.now(),
@@ -217,7 +217,7 @@ class CreditService:
                 user_data['name'] = user_name
             
             user_ref.set(user_data)
-            logger.info(f"🆕 Initialized new user {user_id} with 10 free credits")
+            logger.info(f"🆕 Initialized new user {user_id} with 50 free credits")
             
             # Send welcome email if email is available
             if user_email and user_name:
@@ -226,7 +226,7 @@ class CreditService:
                     welcome_sent = brevo_service.send_welcome_email(
                         user_email=user_email,
                         user_name=user_name,
-                        welcome_credits=10
+                        welcome_credits=50
                     )
                     if welcome_sent:
                         logger.info(f"📧 Welcome email sent to new user {user_email}")

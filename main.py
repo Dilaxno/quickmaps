@@ -683,39 +683,8 @@ async def claim_notes(job_id: str, format: str = "txt", request: Request = None)
     # Extract user information
     user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
     
-    # Check if user has credits and deduct if needed
-    if user_id and db:
-        try:
-            from credit_service import CreditAction
-            # Check if credits were already deducted for this job
-            job_data = job_manager.get_job_status(job_id)
-            if job_data and not job_data.get("credits_deducted", False):
-                # Determine the action type based on job data
-                action_type = job_data.get("action_type", "VIDEO_UPLOAD")
-                if action_type == "YOUTUBE_DOWNLOAD":
-                    action = CreditAction.YOUTUBE_DOWNLOAD
-                elif action_type == "PDF_UPLOAD":
-                    action = CreditAction.PDF_UPLOAD
-                else:
-                    action = CreditAction.VIDEO_UPLOAD
-                
-                # Deduct credits
-                credit_result = await credit_service.deduct_credits(
-                    user_id=user_id,
-                    action=action
-                )
-                
-                if not credit_result.success:
-                    raise HTTPException(
-                        status_code=402,
-                        detail=f"Failed to deduct credits: {credit_result.message}"
-                    )
-                
-                # Mark credits as deducted
-                job_manager.update_job_status(job_id, job_data["status"], credits_deducted=True)
-        except Exception as e:
-            logger.error(f"Credit deduction failed for job {job_id}: {e}")
-            # Don't fail the request if credit deduction fails, just log it
+    # Credits are already deducted during processing, no need to deduct again
+    # This endpoint is just for claiming/accessing already processed notes
     
     # Return the notes content
     return await get_notes_content(job_id, format, request)
