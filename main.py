@@ -581,6 +581,75 @@ async def upload_pdf(
         logger.error(f"PDF upload failed: {e}")
         raise HTTPException(status_code=500, detail=get_context_specific_error("UPLOAD_FAILED", "upload"))
 
+# Audio upload endpoint
+@app.post("/upload-audio/")
+async def upload_audio(
+    background_tasks: BackgroundTasks,
+    audio_file: UploadFile = File(...),
+    request: Request = None,
+):
+    """Handle audio file upload and processing"""
+    
+    # Validate file type
+    allowed_extensions = ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.webm']
+    file_extension = Path(audio_file.filename).suffix.lower()
+    if file_extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Invalid file type. Please upload an audio file with one of these extensions: {', '.join(allowed_extensions)}"
+        )
+    
+    # Check file size (limit to 500MB for audio files)
+    if audio_file.size and audio_file.size > 500 * 1024 * 1024:
+        raise HTTPException(
+            status_code=400, 
+            detail="Audio file is too large. Please upload a file smaller than 500MB."
+        )
+    
+    # Extract user information from Firebase token
+    user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+    
+    # Only check if user has credits (don't deduct yet)
+    if user_id and db:
+        from credit_service import CreditAction
+        credit_result = await credit_service.check_credits(
+            user_id=user_id,
+            action=CreditAction.VIDEO_UPLOAD  # Use VIDEO_UPLOAD action for audio as well
+        )
+        
+        if not credit_result.has_credits:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Insufficient credits. {credit_result.message}"
+            )
+    
+    # Create job
+    job_id = job_manager.create_job(
+        user_id=user_id,
+        user_email=user_email,
+        user_name=user_name,
+        action_type="AUDIO_UPLOAD"
+    )
+    
+    try:
+        # Save uploaded file temporarily
+        file_path = UPLOAD_DIR / f"{job_id}_{audio_file.filename}"
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(audio_file.file, buffer)
+        
+        # Set job to processing status before starting background task
+        job_manager.update_job_status(job_id, "processing", "Starting audio processing...")
+        
+        # Start background processing (use the same video processing pipeline)
+        background_tasks.add_task(processing_service.process_video_file, job_id, str(file_path), user_id)
+        
+        return {"job_id": job_id, "message": "Audio uploaded successfully. Processing started."}
+    
+    except Exception as e:
+        job_manager.set_job_error(job_id, str(e))
+        logger.error(f"Audio upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload audio file. Please try again.")
+
 # Job status endpoint
 @app.get("/status/{job_id}")
 async def get_job_status(job_id: str):
