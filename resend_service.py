@@ -20,7 +20,9 @@ class ResendService:
         # Email Configuration
         self.from_email = os.getenv('RESEND_FROM_EMAIL', 'noreply@quickmaps.pro')
         self.from_name = os.getenv('FROM_NAME', 'QuickMaps')
-        self.frontend_url = os.getenv('FRONTEND_URL', 'http://localhost:3000')
+        self.frontend_url = os.getenv('FRONTEND_URL', 'https://quickmaps.pro')
+        if 'localhost' in self.frontend_url or '127.0.0.1' in self.frontend_url:
+            self.frontend_url = 'https://quickmaps.pro'
         
         # Validate configuration
         if not self.api_key:
@@ -38,209 +40,88 @@ class ResendService:
         <head>
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Reset Your Password - {self.from_name}</title>
-            <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+            <title>Reset Your Password</title>
             <style>
                 body {{
-                    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+                    font-family: Arial, sans-serif;
                     line-height: 1.6;
                     color: #333;
                     margin: 0;
-                    padding: 0;
-                    background: linear-gradient(135deg, #090040 0%, #200080 100%);
-                    min-height: 100vh;
-                }}
-                .email-wrapper {{
-                    max-width: 600px;
-                    margin: 40px auto;
                     padding: 20px;
+                    background: #f9f9f9;
                 }}
                 .container {{
+                    max-width: 500px;
+                    margin: 0 auto;
                     background: white;
-                    border-radius: 16px;
-                    padding: 0;
-                    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-                    overflow: hidden;
+                    border-radius: 8px;
+                    padding: 30px;
                 }}
                 .header {{
-                    background: #090040;
-                    color: white;
                     text-align: center;
-                    padding: 40px 30px;
+                    margin-bottom: 30px;
                 }}
-                .brand-name {{
-                    font-size: 28px;
-                    font-weight: 700;
-                    color: white;
+                .brand {{
+                    font-size: 24px;
+                    font-weight: bold;
+                    color: #333;
                     margin-bottom: 10px;
-                    letter-spacing: -0.5px;
-                }}
-                .tagline {{
-                    font-size: 16px;
-                    color: white;
-                    opacity: 0.9;
-                    margin: 0;
-                    font-weight: 500;
-                }}
-                .content {{
-                    padding: 40px 30px;
-                }}
-                .greeting {{
-                    font-size: 18px;
-                    font-weight: 600;
-                    color: #1f2937;
-                    margin-bottom: 20px;
                 }}
                 .message {{
                     font-size: 16px;
-                    color: #4b5563;
                     margin-bottom: 30px;
-                    line-height: 1.7;
-                }}
-                .button-container {{
-                    text-align: center;
-                    margin: 35px 0;
                 }}
                 .button {{
                     display: inline-block;
-                    background: #090040;
-                    color: white !important;
+                    background: #007bff;
+                    color: white;
                     text-decoration: none;
-                    padding: 16px 32px;
-                    border-radius: 10px;
-                    font-weight: 600;
-                    font-size: 16px;
-                    box-shadow: 0 4px 15px rgba(9, 0, 64, 0.4);
-                    transition: all 0.3s ease;
-                }}
-                .button:hover {{
-                    transform: translateY(-2px);
-                    box-shadow: 0 8px 25px rgba(9, 0, 64, 0.6);
-                }}
-                .warning {{
-                    background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-                    border-left: 4px solid #f59e0b;
-                    border-radius: 8px;
-                    padding: 20px;
-                    margin: 25px 0;
-                }}
-                .warning-title {{
-                    font-weight: 600;
-                    color: #92400e;
-                    margin-bottom: 5px;
-                    font-size: 16px;
-                }}
-                .warning-text {{
-                    color: #78350f;
-                    font-size: 14px;
-                    margin: 0;
-                }}
-                .alternative-link {{
-                    background-color: #f8fafc;
-                    border-radius: 8px;
-                    padding: 20px;
-                    margin: 25px 0;
-                }}
-                .alternative-text {{
-                    font-size: 14px;
-                    color: #6b7280;
-                    margin-bottom: 10px;
-                }}
-                .link-text {{
-                    word-break: break-all;
-                    color: #2563eb;
-                    font-size: 13px;
-                    font-family: monospace;
-                    background: #e0e7ff;
-                    padding: 10px;
+                    padding: 12px 24px;
                     border-radius: 4px;
-                    margin: 0;
+                    font-weight: bold;
+                }}
+                .button-container {{
+                    text-align: center;
+                    margin: 30px 0;
                 }}
                 .footer {{
-                    background-color: #f9fafb;
-                    padding: 30px;
-                    border-top: 1px solid #e5e7eb;
+                    font-size: 14px;
+                    color: #666;
                     text-align: center;
+                    margin-top: 30px;
                 }}
-                .footer-text {{
-                    font-size: 14px;
-                    color: #6b7280;
-                    margin: 5px 0;
-                }}
-                .social-links {{
-                    margin: 20px 0;
-                }}
-                .security-note {{
-                    background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
-                    border-left: 4px solid #3b82f6;
-                    border-radius: 8px;
-                    padding: 20px;
-                    margin: 25px 0;
-                }}
-                .security-title {{
-                    font-weight: 600;
-                    color: #1e40af;
-                    margin-bottom: 5px;
-                    font-size: 16px;
-                }}
-                .security-text {{
-                    color: #1e3a8a;
-                    font-size: 14px;
-                    margin: 0;
-                }}
-                @media only screen and (max-width: 480px) {{
-                    .email-wrapper {{ padding: 10px; }}
-                    .header {{ padding: 30px 20px; }}
-                    .content {{ padding: 30px 20px; }}
-                    .logo {{ font-size: 28px; }}
-                    .button {{ padding: 14px 24px; font-size: 15px; }}
+                .link {{
+                    color: #007bff;
+                    word-break: break-all;
                 }}
             </style>
         </head>
         <body>
-            <div class="email-wrapper">
-                <div class="container">
-                    <div class="header">
-                        <div class="brand-name">QuickMaps</div>
-                        <p class="tagline">Transform your learning with AI-powered notes</p>
-                    </div>
-                    
-                    <div class="content">
-                        <div class="greeting">Hi there! 👋</div>
-                        
-                        <div class="message">
-                            <p>We received a request to reset your password for your <strong>QuickMaps</strong> account. No worries - it happens to the best of us!</p>
-                            <p>Click the button below to create a new password and get back to creating amazing notes:</p>
-                        </div>
-                        
-                        <div class="button-container">
-                            <a href="{reset_url}" class="button" style="color: white !important;">Reset My Password</a>
-                        </div>
-                        
-                        <div class="warning">
-                            <div class="warning-title">⏰ Time-Sensitive Link</div>
-                            <p class="warning-text">This reset link will expire in <strong>1 hour</strong> for your security. If it expires, simply request a new one.</p>
-                        </div>
-                        
-                        <div class="security-note">
-                            <div class="security-title">🛡️ Didn't Request This?</div>
-                            <p class="security-text">If you didn't ask for a password reset, you can safely ignore this email. Your account remains secure.</p>
-                        </div>
-                        
-                        <div class="alternative-link">
-                            <p class="alternative-text">Having trouble with the button? Copy and paste this link into your browser:</p>
-                            <p class="link-text">{reset_url}</p>
-                        </div>
-                    </div>
-                    
-                    <div class="footer">
-                        <p class="footer-text">This email was sent by <strong>QuickMaps</strong></p>
-                        <p class="footer-text">Questions? Contact our support team - we're here to help!</p>
-                        <div class="social-links">
-                            <p class="footer-text">🌐 quickmaps.pro | 📧 support@quickmaps.pro</p>
-                        </div>
-                        <p class="footer-text">&copy; {datetime.now().year} QuickMaps. All rights reserved.</p>
-                    </div>
+            <div class="container">
+                <div class="header">
+                    <div class="brand">QuickMaps</div>
+                </div>
+                
+                <div class="message">
+                    <p>Hi there,</p>
+                    <p>You requested a password reset for your QuickMaps account.</p>
+                    <p>Click the button below to reset your password:</p>
+                </div>
+                
+                <div class="button-container">
+                    <a href="{reset_url}" class="button">Reset Password</a>
+                </div>
+                
+                <div class="message">
+                    <p>This link will expire in 1 hour for security.</p>
+                    <p>If you did not request this reset, please ignore this email.</p>
+                    <p>Link not working? Copy and paste this URL:</p>
+                    <p><a href="{reset_url}" class="link">{reset_url}</a></p>
+                </div>
+                
+                <div class="footer">
+                    <p>QuickMaps Team</p>
+                    <p>This is an automated message, please do not reply.</p>
                 </div>
             </div>
         </body>
@@ -250,30 +131,23 @@ class ResendService:
     def get_password_reset_text(self, reset_url: str) -> str:
         """Get the plain text version for password reset email"""
         return f"""
-🗺️ QuickMaps - Password Reset Request
+QuickMaps - Password Reset
 
-Hi there! 👋
+Hi there,
 
-We received a request to reset your password for your QuickMaps account. No worries - it happens to the best of us!
+You requested a password reset for your QuickMaps account.
 
-🔐 RESET YOUR PASSWORD:
+Click this link to reset your password:
 {reset_url}
 
-⏰ IMPORTANT: This reset link will expire in 1 hour for your security. If it expires, simply request a new one from our website.
+This link will expire in 1 hour for security.
 
-🛡️ DIDN'T REQUEST THIS?
-If you didn't ask for a password reset, you can safely ignore this email. Your account remains secure.
-
-📧 NEED HELP?
-Questions? Contact our support team at support@quickmaps.pro - we're here to help!
-
-🌐 Visit us: quickmaps.pro
+If you did not request this reset, please ignore this email.
 
 Best regards,
-The QuickMaps Team
+QuickMaps Team
 
-© {datetime.now().year} QuickMaps. All rights reserved.
-Transform your learning with AI-powered notes.
+This is an automated message, please do not reply.
         """
     
     def get_welcome_email_template(self, user_name: str = "there") -> str:

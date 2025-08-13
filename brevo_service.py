@@ -13,6 +13,8 @@ class BrevoEmailService:
         self.sender_email = os.getenv('BREVO_SENDER_EMAIL')
         self.sender_name = os.getenv('BREVO_SENDER_NAME', 'QuickMaps')
         self.frontend_url = os.getenv('FRONTEND_URL', 'https://quickmaps.pro')
+        if 'localhost' in self.frontend_url or '127.0.0.1' in self.frontend_url:
+            self.frontend_url = 'https://quickmaps.pro'
         self.base_url = 'https://api.brevo.com/v3'
         
         # Debug logging
@@ -780,7 +782,7 @@ class BrevoEmailService:
         
         try:
             reset_url = f"{self.frontend_url}/reset-password?token={reset_token}"
-            subject = "🔐 Reset Your Password - QuickMaps"
+            subject = "Reset Your Password - QuickMaps"
             
             html_content = f"""
             <!DOCTYPE html>
@@ -788,191 +790,88 @@ class BrevoEmailService:
             <head>
                 <meta charset="UTF-8">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Reset Your Password - QuickMaps</title>
-                <link rel="preconnect" href="https://fonts.googleapis.com">
-                <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-                <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+                <title>Reset Your Password</title>
                 <style>
                     body {{
-                        font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                        font-family: Arial, sans-serif;
                         line-height: 1.6;
                         color: #333;
                         margin: 0;
                         padding: 20px;
-                        background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-                        min-height: 100vh;
+                        background: #f9f9f9;
                     }}
                     .container {{
-                        max-width: 600px;
+                        max-width: 500px;
                         margin: 0 auto;
                         background: white;
-                        border-radius: 16px;
-                        overflow: hidden;
-                        box-shadow: 0 10px 30px rgba(9, 0, 64, 0.1);
+                        border-radius: 8px;
+                        padding: 30px;
                     }}
                     .header {{
-                        background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
-                        color: white;
                         text-align: center;
-                        padding: 40px 30px;
-                        position: relative;
+                        margin-bottom: 30px;
                     }}
-                    .logo {{
-                        margin-bottom: 20px;
-                    }}
-                    .logo img {{
-                        height: 50px;
-                        width: auto;
-                        max-width: 200px;
-                    }}
-                    .brand-name {{
-                        font-size: 32px;
-                        font-weight: 800;
-                        margin-bottom: 8px;
-                        color: #ffffff;
-                        text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-                    }}
-                    .tagline {{
-                        font-size: 16px;
-                        opacity: 0.95;
-                        margin: 0;
-                        color: #ffffff;
-                    }}
-                    .content {{
-                        padding: 40px 30px;
-                    }}
-                    .greeting {{
-                        font-size: 22px;
-                        font-weight: 700;
-                        color: #090040;
-                        margin-bottom: 24px;
+                    .brand {{
+                        font-size: 24px;
+                        font-weight: bold;
+                        color: #333;
+                        margin-bottom: 10px;
                     }}
                     .message {{
                         font-size: 16px;
-                        color: #495057;
-                        margin-bottom: 32px;
-                        line-height: 1.7;
-                    }}
-                    .button-container {{
-                        text-align: center;
-                        margin: 35px 0;
+                        margin-bottom: 30px;
                     }}
                     .button {{
                         display: inline-block;
-                        background: #ffffff;
-                        color: #090040 !important;
+                        background: #007bff;
+                        color: white;
                         text-decoration: none;
-                        padding: 18px 36px;
-                        border-radius: 12px;
-                        font-weight: 700;
-                        font-size: 16px;
-                        box-shadow: 0 6px 20px rgba(9, 0, 64, 0.15);
-                        transition: all 0.3s ease;
-                        text-transform: uppercase;
-                        letter-spacing: 0.5px;
-                        border: 2px solid #ffffff;
+                        padding: 12px 24px;
+                        border-radius: 4px;
+                        font-weight: bold;
                     }}
-                    .button:hover {{
-                        transform: translateY(-2px);
-                        box-shadow: 0 8px 25px rgba(9, 0, 64, 0.25);
-                        background: #f8f9fa;
-                    }}
-                    .warning-box {{
-                        background: linear-gradient(135deg, #fff9c4 0%, #fef3c7 100%);
-                        border-left: 4px solid #f59e0b;
-                        border-radius: 8px;
-                        padding: 20px;
-                        margin: 25px 0;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-                    }}
-                    .security-box {{
-                        background: linear-gradient(135deg, #e0f2fe 0%, #e7f3ff 100%);
-                        border-left: 4px solid #090040;
-                        border-radius: 8px;
-                        padding: 20px;
-                        margin: 25px 0;
-                        box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                    .button-container {{
+                        text-align: center;
+                        margin: 30px 0;
                     }}
                     .footer {{
-                        background: linear-gradient(135deg, #f9fafb 0%, #f1f5f9 100%);
-                        padding: 32px;
+                        font-size: 14px;
+                        color: #666;
                         text-align: center;
-                        color: #090040;
-                        font-size: 14px;
-                        border-top: 1px solid #e5e7eb;
+                        margin-top: 30px;
                     }}
-                    .footer-brand {{
-                        font-weight: 700;
-                        color: #090040;
-                        font-size: 16px;
-                        margin-bottom: 8px;
-                    }}
-                    .alternative-link {{
-                        background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-                        border-radius: 8px;
-                        padding: 20px;
-                        margin: 25px 0;
-                        font-size: 14px;
-                        color: #6b7280;
+                    .link {{
+                        color: #007bff;
                         word-break: break-all;
-                        text-align: center;
-                        border: 1px solid #e5e7eb;
-                    }}
-                    .alternative-link a {{
-                        color: #090040;
-                        font-weight: 600;
-                        text-decoration: none;
-                    }}
-                    .alternative-link a:hover {{
-                        text-decoration: underline;
-                    }}
-                    .quickmaps-branding {{
-                        background: linear-gradient(135deg, #090040 0%, #1a0f5c 100%);
-                        -webkit-background-clip: text;
-                        -webkit-text-fill-color: transparent;
-                        background-clip: text;
-                        font-weight: 800;
                     }}
                 </style>
             </head>
             <body>
                 <div class="container">
                     <div class="header">
-                        <div class="brand-name">QuickMaps</div>
-                        <p class="tagline">🗺️ Transform your learning with AI-powered visual notes</p>
+                        <div class="brand">QuickMaps</div>
                     </div>
                     
-                    <div class="content">
-                        <div class="greeting">Hi {user_name}! 👋</div>
-                        
-                        <div class="message">
-                            <p>We received a request to reset your password for your <strong class="quickmaps-branding">QuickMaps</strong> account. No worries - it happens to the best of us!</p>
-                            <p>Click the button below to create a new secure password and get back to creating amazing visual notes and mind maps:</p>
-                        </div>
-                        
-                        <div class="button-container">
-                            <a href="{reset_url}" class="button">🔒 Reset My Password</a>
-                        </div>
-                        
-                        <div class="warning-box">
-                            <strong>⏰ Time-Sensitive Link:</strong> This reset link will expire in <strong>1 hour</strong> for your security. If it expires, simply request a new one from the login page.
-                        </div>
-                        
-                        <div class="security-box">
-                            <strong>🛡️ Didn't Request This?</strong> If you didn't ask for a password reset, you can safely ignore this email. Your account remains completely secure.
-                        </div>
-                        
-                        <div class="alternative-link">
-                            <p><strong>Button not working?</strong> Copy and paste this link into your browser:</p>
-                            <a href="{reset_url}">{reset_url}</a>
-                        </div>
+                    <div class="message">
+                        <p>Hi {user_name},</p>
+                        <p>You requested a password reset for your QuickMaps account.</p>
+                        <p>Click the button below to reset your password:</p>
+                    </div>
+                    
+                    <div class="button-container">
+                        <a href="{reset_url}" class="button">Reset Password</a>
+                    </div>
+                    
+                    <div class="message">
+                        <p>This link will expire in 1 hour for security.</p>
+                        <p>If you did not request this reset, please ignore this email.</p>
+                        <p>Link not working? Copy and paste this URL:</p>
+                        <p><a href="{reset_url}" class="link">{reset_url}</a></p>
                     </div>
                     
                     <div class="footer">
-                        <p class="footer-brand">🗺️ QuickMaps</p>
-                        <p>Creating amazing visual notes and mind maps with AI</p>
-                        <p>Questions? Contact our support team - we're here to help!</p>
-                        <p>&copy; {datetime.now().year} QuickMaps. All rights reserved.</p>
+                        <p>QuickMaps Team</p>
+                        <p>This is an automated message, please do not reply.</p>
                     </div>
                 </div>
             </body>
@@ -981,30 +880,23 @@ class BrevoEmailService:
             
             # Plain text version
             text_content = f"""
-            🗺️ QUICKMAPS - Password Reset Request
+            QuickMaps - Password Reset
             
-            Hi {user_name}! 👋
+            Hi {user_name},
             
-            We received a request to reset your password for your QuickMaps account. No worries - it happens to the best of us!
+            You requested a password reset for your QuickMaps account.
             
-            🔐 RESET YOUR PASSWORD:
             Click this link to reset your password:
             {reset_url}
             
-            ⏰ TIME-SENSITIVE LINK:
-            This reset link will expire in 1 hour for your security. If it expires, simply request a new one from the login page.
+            This link will expire in 1 hour for security.
             
-            🛡️ DIDN'T REQUEST THIS?
-            If you didn't ask for a password reset, you can safely ignore this email. Your account remains completely secure.
-            
-            📧 NEED HELP?
-            Questions? Contact our support team - we're here to help!
+            If you did not request this reset, please ignore this email.
             
             Best regards,
-            The QuickMaps Team
+            QuickMaps Team
             
-            🗺️ QuickMaps - Creating amazing visual notes and mind maps with AI
-            © {datetime.now().year} QuickMaps. All rights reserved.
+            This is an automated message, please do not reply.
             """
             
             # Prepare email data
