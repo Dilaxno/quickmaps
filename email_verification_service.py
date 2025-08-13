@@ -143,31 +143,35 @@ class EmailVerificationService:
                 </div>
                 <div class="content">
                     <p class="greeting">Hi {name},</p>
-                    <p class="subtitle">Use this one-time verification code to complete your sign up. It expires in {expiry_minutes} minutes.</p>
+                    <p class="subtitle">Click the button below to activate your account and start using QuickMaps. This link expires in {expiry_minutes} minutes.</p>
                     <span class="code-box">{code}</span>
                     <div class="button-container">
-                        <a href="{frontend_url}" class="button">Open QuickMaps</a>
+                        <a href="{verification_url}" class="button">Activate Account</a>
                     </div>
                     <div class="divider"></div>
                     <p class="note">If you didn't request this, you can safely ignore this email.</p>
                 </div>
                 <div class="footer">
-                    <p>© {current_year} QuickMaps. All rights reserved. <a href="{frontend_url}">{frontend_url}</a></p>
+                    <p>© {current_year} QuickMaps. All rights reserved. <a href="https://quickmaps.pro">https://quickmaps.pro</a></p>
                 </div>
             </div>
         </body>
         </html>
         """
             
+            # Create verification URL that will auto-verify and redirect to dashboard
+            verification_url = f"https://quickmaps.pro/verify-email?email={email}&code={code}"
+            
             html_content = html_template.format(
                 frontend_url=frontend_url,
                 name=name,
                 expiry_minutes=expiry_minutes,
                 code=code,
-                current_year=current_year
+                current_year=current_year,
+                verification_url=verification_url
             )
             
-            text_content = f"Your QuickMaps verification code is: {code}\nThis code expires in {expiry_minutes} minutes. If you didn't request it, ignore this email."
+            text_content = f"Your QuickMaps verification code is: {code}\n\nClick this link to activate your account: {verification_url}\n\nThis code expires in {expiry_minutes} minutes. If you didn't request it, ignore this email."
             
             email_data = {
                 "sender": {"name": brevo_service.sender_name, "email": brevo_service.sender_email},

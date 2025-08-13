@@ -3970,6 +3970,64 @@ async def verify_email_otp(req: VerifyOtpRequest):
         logger.error(f"verify_email_otp error: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+@app.get("/verify-email")
+async def verify_email_via_url(email: str, code: str):
+    """Handle email verification via URL and redirect to dashboard"""
+    try:
+        logger.info(f"Email verification via URL: {email} with code: {code}")
+        
+        # Verify the email using the existing service
+        result = email_verification_service.verify(email, code)
+        
+        if result.get("success"):
+            logger.info(f"Email verification successful for: {email}")
+            # Redirect to dashboard with success message
+            from fastapi.responses import RedirectResponse
+            return RedirectResponse(
+                url="https://quickmaps.pro/dashboard?verified=true",
+                status_code=302
+            )
+        else:
+            # Handle different error cases
+            err = result.get("error")
+            error_message = result.get("message", "Verification failed")
+            
+            logger.error(f"Email verification failed for {email}: {err} - {error_message}")
+            
+            # Redirect to error page with appropriate message
+            if err == "EXPIRED":
+                return RedirectResponse(
+                    url="https://quickmaps.pro/signup?error=expired",
+                    status_code=302
+                )
+            elif err == "ALREADY_USED":
+                return RedirectResponse(
+                    url="https://quickmaps.pro/dashboard?verified=true",
+                    status_code=302
+                )
+            elif err in ("NOT_REQUESTED", "INVALID_CODE"):
+                return RedirectResponse(
+                    url="https://quickmaps.pro/signup?error=invalid",
+                    status_code=302
+                )
+            elif err == "TOO_MANY_ATTEMPTS":
+                return RedirectResponse(
+                    url="https://quickmaps.pro/signup?error=attempts",
+                    status_code=302
+                )
+            else:
+                return RedirectResponse(
+                    url="https://quickmaps.pro/signup?error=failed",
+                    status_code=302
+                )
+                
+    except Exception as e:
+        logger.error(f"verify_email_via_url error: {e}")
+        return RedirectResponse(
+            url="https://quickmaps.pro/signup?error=server",
+            status_code=302
+        )
+
 # User Statistics endpoints
 @app.get("/api/user-statistics/{user_id}")
 async def get_user_statistics(user_id: str, request: Request = None):
