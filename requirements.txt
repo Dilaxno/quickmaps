@@ -2,8 +2,15 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 yt-dlp>=2025.08.11	
-openai-whisper
+
+# torch and torchaudio only needed for local whisper
+# Keep them for fallback support, or remove if deploying Deepgram-only
 torch>=2.1.0
+orjson>=3.10.0
+
+# Deepgram SDK for cloud Whisper
+deepgram-sdk>=3.0.0
+
 torchaudio>=2.1.0
 numpy>=1.26.0,<3.0.0
 ffmpeg-python==0.2.0
