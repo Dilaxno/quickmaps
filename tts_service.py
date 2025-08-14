@@ -680,51 +680,29 @@ class TTSService:
             }
     
     def _clean_text_for_tts(self, text: str) -> str:
-        """Clean text content for better TTS output with voice delays"""
+        """Clean text content for natural TTS output without artificial pauses"""
         import re
         
-        # First, identify and mark titles/headers for special treatment
+        # Remove markdown formatting but keep the text natural
         lines = text.split('\n')
         processed_lines = []
         
-        for i, line in enumerate(lines):
+        for line in lines:
             line = line.strip()
             if not line:
                 continue
                 
-            # Check if this line looks like a title/header
-            is_title = False
+            # Remove markdown headers but keep the text as-is
+            line = re.sub(r'^#{1,6}\s+', '', line)  # Remove markdown headers
             
-            # Pattern 1: Markdown headers (# ## ### etc.)
-            if re.match(r'^#{1,6}\s+', line):
-                is_title = True
-                line = re.sub(r'^#{1,6}\s+', '', line)  # Remove markdown
-                
-            # Pattern 2: Section titles (Section X:, X., etc.)
-            elif re.match(r'^(Section\s+\d+:|[IVX]+\.|[A-Z]\.|[0-9]+\.)\s*', line):
-                is_title = True
-                
-            # Pattern 3: Lines ending with colon (likely titles)
-            elif line.endswith(':') and len(line.split()) <= 8:
-                is_title = True
-                
-            # Pattern 4: Short lines that are all caps or title case
-            elif (len(line.split()) <= 6 and 
-                  (line.isupper() or line.istitle()) and 
-                  not line.endswith('.') and 
-                  not line.endswith('!')):
-                is_title = True
+            # Remove list markers but keep the content
+            line = re.sub(r'^\s*[\*\-\+]\s+', '', line)  # Remove bullet points
+            line = re.sub(r'^\s*\d+\.\s+', '', line)  # Remove numbered lists
             
-            # Add appropriate delays for titles
-            if is_title:
-                # Add natural pause after titles
-                if not line.endswith('.') and not line.endswith('!') and not line.endswith('?'):
-                    line = line + '.'  # Just a period for natural pause
-                processed_lines.append(line)
-            else:
-                processed_lines.append(line)
+            # Keep the line as natural text
+            processed_lines.append(line)
         
-        # Rejoin the processed lines
+        # Rejoin the processed lines with natural spacing
         text = '\n'.join(processed_lines)
         
         # Remove remaining markdown formatting
@@ -734,34 +712,24 @@ class TTSService:
         text = re.sub(r'```[^`]*```', '', text, flags=re.DOTALL)  # Code blocks
         text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)  # Links
         
-        # Clean up bullet points and lists with pauses
-        text = re.sub(r'^\s*[\*\-\+]\s+', '', text, flags=re.MULTILINE)
-        text = re.sub(r'^\s*\d+\.\s+', '', text, flags=re.MULTILINE)
-        
         # Remove duplicate section titles
         text = self._remove_duplicate_titles(text)
         
-        # Remove excessive whitespace
-        text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
+        # Clean up whitespace naturally
+        text = re.sub(r'\n\s*\n\s*\n+', '\n\n', text)  # Multiple blank lines to double
+        text = re.sub(r'\n\n', '. ', text)  # Double newlines become natural sentence breaks
+        text = re.sub(r'\n', ' ', text)  # Single newlines become spaces
         
-        # Add strategic pauses for better speech flow
-        # Double newlines become natural pauses
-        text = text.replace('\n\n', '. ')  # Period for natural pause
+        # Only add periods where sentences clearly end without punctuation
+        # But be very conservative to avoid breaking up titles
+        text = re.sub(r'([a-z])\s+([A-Z][a-z]{2,})', r'\1. \2', text)  # Only if next word is clearly a new sentence
         
-        # Single newlines become short pauses
-        text = text.replace('\n', ' ')  # Just space for natural flow
-        
-        # Add periods after sentences that don't end with punctuation (but only at sentence boundaries)
-        text = re.sub(r'([a-zA-Z0-9])\s+([A-Z][a-z])', r'\1. \2', text)
-        
-        # Clean up excessive punctuation but preserve natural flow
-        text = re.sub(r'\.{3,}', '.', text)  # Replace multiple dots with single period
-        text = re.sub(r',,+', ',', text)  # Remove multiple commas
+        # Clean up spacing
         text = re.sub(r'\s+', ' ', text)  # Normalize spaces
-        text = re.sub(r'\s+([,.!?])', r'\1', text)  # Remove space before punctuation
+        text = re.sub(r'\s+([.!?])', r'\1', text)  # Remove space before punctuation
         
         # Ensure proper spacing after punctuation
-        text = re.sub(r'([,.!?])([A-Za-z])', r'\1 \2', text)
+        text = re.sub(r'([.!?])([A-Za-z])', r'\1 \2', text)
         
         return text.strip()
     
