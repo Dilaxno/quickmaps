@@ -717,9 +717,9 @@ class TTSService:
             
             # Add appropriate delays for titles
             if is_title:
-                # Add longer pause after titles with comma and period
-                if not line.endswith('.') and not line.endswith(','):
-                    line = line + ',.'  # Comma for short pause, period for longer pause
+                # Add natural pause after titles
+                if not line.endswith('.') and not line.endswith('!') and not line.endswith('?'):
+                    line = line + '.'  # Just a period for natural pause
                 processed_lines.append(line)
             else:
                 processed_lines.append(line)
@@ -745,17 +745,17 @@ class TTSService:
         text = re.sub(r'\n\s*\n\s*\n', '\n\n', text)
         
         # Add strategic pauses for better speech flow
-        # Double newlines become longer pauses
-        text = text.replace('\n\n', '... ')  # Three dots for longer pause
+        # Double newlines become natural pauses
+        text = text.replace('\n\n', '. ')  # Period for natural pause
         
-        # Single newlines become shorter pauses
-        text = text.replace('\n', ', ')  # Comma for shorter pause
+        # Single newlines become short pauses
+        text = text.replace('\n', ' ')  # Just space for natural flow
         
-        # Add pauses after sentences that don't end with punctuation
-        text = re.sub(r'([a-zA-Z0-9])\s+([A-Z])', r'\1. \2', text)
+        # Add periods after sentences that don't end with punctuation (but only at sentence boundaries)
+        text = re.sub(r'([a-zA-Z0-9])\s+([A-Z][a-z])', r'\1. \2', text)
         
-        # Clean up excessive punctuation but preserve intentional pauses
-        text = re.sub(r'\.{4,}', '...', text)  # Max 3 dots
+        # Clean up excessive punctuation but preserve natural flow
+        text = re.sub(r'\.{3,}', '.', text)  # Replace multiple dots with single period
         text = re.sub(r',,+', ',', text)  # Remove multiple commas
         text = re.sub(r'\s+', ' ', text)  # Normalize spaces
         text = re.sub(r'\s+([,.!?])', r'\1', text)  # Remove space before punctuation
