@@ -23,6 +23,49 @@ class TranscriptionService:
         self.use_deepgram = USE_DEEPGRAM and bool(DEEPGRAM_API_KEY)
         if not self.use_deepgram:
             logger.warning("Deepgram not configured. Set USE_DEEPGRAM=true and provide DEEPGRAM_API_KEY.")
+    
+    def _build_segments_from_words(self, words):
+        """Build segments from word-level timestamps"""
+        segments = []
+        if not words:
+            return segments
+            
+        try:
+            # Handle both object and dictionary word formats
+            def get_word_attr(word, attr, default=0):
+                if hasattr(word, attr):
+                    return getattr(word, attr, default)
+                elif isinstance(word, dict):
+                    return word.get(attr, default)
+                return default
+            
+            first_word = words[0]
+            current = {
+                "start": get_word_attr(first_word, 'start', 0),
+                "end": get_word_attr(first_word, 'end', 0),
+                "text": get_word_attr(first_word, 'word', '')
+            }
+            
+            for w in words[1:]:
+                w_start = get_word_attr(w, 'start', 0)
+                w_end = get_word_attr(w, 'end', 0)
+                w_word = get_word_attr(w, 'word', '')
+                
+                gap = w_start - current["end"]
+                if gap > 0.6:  # new segment if pause is bigger than 600ms
+                    segments.append(current)
+                    current = {"start": w_start, "end": w_end, "text": w_word}
+                else:
+                    current["end"] = w_end
+                    current["text"] += (" " + w_word)
+            
+            if current:
+                segments.append(current)
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Error building segments from words: {e}")
+            
+        return segments
 
 
 
@@ -36,10 +79,13 @@ class TranscriptionService:
             ) from e
 
         try:
+            logger.info(f"🎤 Starting Deepgram transcription with model: {DEEPGRAM_MODEL or 'whisper-large'}")
             client = DeepgramClient(DEEPGRAM_API_KEY) if DEEPGRAM_API_KEY else DeepgramClient()
 
             with open(audio_path, 'rb') as f:
-                source: FileSource = {"buffer": f.read()}
+                buffer_data = f.read()
+                logger.info(f"📁 Audio file size: {len(buffer_data)} bytes")
+                source: FileSource = {"buffer": buffer_data}
 
             options = PrerecordedOptions(
                 model=DEEPGRAM_MODEL or "whisper-large",
@@ -49,32 +95,68 @@ class TranscriptionService:
                 utterances=False,
                 diarize=False,
             )
+            
+            logger.info("🔄 Sending request to Deepgram...")
 
             resp = client.listen.rest.v("1").transcribe_file(source, options)
-            # Deepgram JSON has results in resp['results']['channels'][0]['alternatives'][0]
-            alt = resp.get('results', {}).get('channels', [{}])[0].get('alternatives', [{}])[0]
-            text = alt.get('transcript', '')
-            language = alt.get('language', 'en')
-
-            # Build segments from words if available
+            logger.info(f"📥 Received response from Deepgram. Type: {type(resp)}")
+            
+            # Handle both dictionary and object responses
+            text = ''
+            language = 'en'
             segments = []
-            words = alt.get('words') or []
-            if words:
-                # group words into segments by small gaps
-                current = {"start": words[0].get('start', 0), "end": words[0].get('end', 0), "text": words[0].get('word', '')}
-                for w in words[1:]:
-                    gap = w.get('start', 0) - current["end"]
-                    if gap > 0.6:  # new segment if pause is bigger than 600ms
-                        segments.append(current)
-                        current = {"start": w.get('start', 0), "end": w.get('end', 0), "text": w.get('word', '')}
+            
+            try:
+                # Try object-style access first (newer SDK)
+                if hasattr(resp, 'results') and resp.results:
+                    channel = resp.results.channels[0] if resp.results.channels else None
+                    if channel and channel.alternatives:
+                        alt = channel.alternatives[0]
+                        text = getattr(alt, 'transcript', '')
+                        language = getattr(alt, 'detected_language', 'en') or 'en'
+                        
+                        # Build segments from words if available
+                        words = getattr(alt, 'words', []) or []
+                        segments = self._build_segments_from_words(words)
+                        
+                elif hasattr(resp, 'to_dict'):
+                    # Try converting to dict if available
+                    resp_dict = resp.to_dict()
+                    alt = resp_dict.get('results', {}).get('channels', [{}])[0].get('alternatives', [{}])[0]
+                    text = alt.get('transcript', '')
+                    language = alt.get('detected_language', 'en') or 'en'
+                    
+                    words = alt.get('words', [])
+                    segments = self._build_segments_from_words(words)
+                    
+                else:
+                    # Fallback: try dictionary access (older SDK)
+                    alt = resp.get('results', {}).get('channels', [{}])[0].get('alternatives', [{}])[0]
+                    text = alt.get('transcript', '')
+                    language = alt.get('detected_language', 'en') or 'en'
+                    
+                    words = alt.get('words', [])
+                    segments = self._build_segments_from_words(words)
+                    
+            except Exception as parse_error:
+                logger.warning(f"⚠️ Error parsing Deepgram response: {parse_error}")
+                # Try to extract basic text at least
+                try:
+                    if hasattr(resp, 'results'):
+                        text = str(resp.results.channels[0].alternatives[0].transcript)
                     else:
-                        current["end"] = w.get('end', current["end"])
-                        current["text"] += (" " + w.get('word', ''))
-                if current:
-                    segments.append(current)
+                        text = "Transcription completed but text extraction failed"
+                except:
+                    text = "Transcription failed to parse"
 
+            logger.info(f"✅ Deepgram transcription completed. Text length: {len(text)} chars, Segments: {len(segments)}")
             return {"text": text, "segments": segments, "language": language}
+            
         except Exception as e:
+            logger.error(f"❌ Deepgram transcription failed: {str(e)}")
+            logger.error(f"Response type: {type(resp) if 'resp' in locals() else 'No response'}")
+            if 'resp' in locals():
+                logger.error(f"Response attributes: {dir(resp)}")
             raise Exception(f"Deepgram transcription failed: {e}")
 
     def transcribe_audio(self, audio_path: str) -> Dict[str, Any]:
