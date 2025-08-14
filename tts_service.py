@@ -379,32 +379,27 @@ class TTSService:
                 "Content-Type": "application/json"
             }
             
-            # Available Aura voices:
-            # aura-asteria-en (female, American English)
-            # aura-luna-en (female, American English) 
-            # aura-stella-en (female, American English)
-            # aura-athena-en (female, British English)
-            # aura-hera-en (female, American English)
-            # aura-orion-en (male, American English)
-            # aura-arcas-en (male, American English)
-            # aura-perseus-en (male, American English)
-            # aura-angus-en (male, Irish English)
-            # aura-orpheus-en (male, American English)
-            # aura-helios-en (male, British English)
-            # aura-zeus-en (male, American English)
-            
-            payload = {
-                "text": text,
+            # Query parameters (model, encoding, sample_rate go here)
+            params = {
                 "model": self.voice,         # Use configured voice
                 "encoding": "linear16",      # WAV format
                 "sample_rate": 24000        # High quality sample rate
             }
             
+            # JSON payload (only text goes here)
+            payload = {
+                "text": text
+            }
+            
+            logger.info(f"🔍 Sending to Deepgram TTS - URL: {url}")
+            logger.info(f"🔍 Query params: {params}")
+            logger.info(f"🔍 JSON payload: {payload}")
+            
             # Use timeout for the request
             timeout = httpx.Timeout(60.0)  # 1 minute timeout
             
             with httpx.Client(timeout=timeout) as client:
-                response = client.post(url, headers=headers, json=payload)
+                response = client.post(url, headers=headers, params=params, json=payload)
                 
                 if response.status_code != 200:
                     error_text = response.text[:500]
