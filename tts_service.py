@@ -249,7 +249,11 @@ class TTSService:
             text = self._clean_text_for_tts(text)
             
             # Limit text length to prevent memory issues
-            max_length = 5000  # Adjust based on backend capabilities
+            if self.backend == "deepgram_aura1":
+                max_length = 10000  # Deepgram can handle longer texts with chunking
+            else:
+                max_length = 5000   # Other backends
+                
             if len(text) > max_length:
                 text = text[:max_length] + "..."
                 logger.warning(f"Text truncated to {max_length} characters for TTS")
@@ -282,7 +286,11 @@ class TTSService:
             text = self._clean_text_for_tts(text)
             
             # Limit text length to prevent memory issues
-            max_length = 5000  # Adjust based on backend capabilities
+            if self.backend == "deepgram_aura1":
+                max_length = 10000  # Deepgram can handle longer texts with chunking
+            else:
+                max_length = 5000   # Other backends
+                
             if len(text) > max_length:
                 text = text[:max_length] + "..."
                 logger.warning(f"Text truncated to {max_length} characters for TTS")
@@ -364,74 +372,243 @@ class TTSService:
             raise Exception(f"gTTS generation failed: {e}")
 
     def _generate_with_deepgram_aura1(self, text: str, output_path: str) -> Dict[str, Any]:
-        """Generate speech using Deepgram Aura1 TTS"""
+        """Generate speech using Deepgram Aura1 TTS with text chunking for long texts"""
         try:
             import httpx
+            import wave
+            import io
             from config import DEEPGRAM_API_KEY
             
             logger.info(f"🎤 Generating TTS with Deepgram Aura1 voice: {self.voice}")
+            logger.info(f"📝 Text length: {len(text)} characters")
             
-            # Deepgram TTS API endpoint
-            url = "https://api.deepgram.com/v1/speak"
+            # Deepgram TTS has a 2000 character limit per request
+            max_chunk_size = 1900  # Leave some buffer
             
-            headers = {
-                "Authorization": f"Token {DEEPGRAM_API_KEY}",
-                "Content-Type": "application/json"
-            }
-            
-            # Query parameters (model, encoding, sample_rate go here)
-            params = {
-                "model": self.voice,         # Use configured voice
-                "encoding": "linear16",      # WAV format
-                "sample_rate": 24000        # High quality sample rate
-            }
-            
-            # JSON payload (only text goes here)
-            payload = {
-                "text": text
-            }
-            
-            logger.info(f"🔍 Sending to Deepgram TTS - URL: {url}")
-            logger.info(f"🔍 Query params: {params}")
-            logger.info(f"🔍 JSON payload: {payload}")
-            
-            # Use timeout for the request
-            timeout = httpx.Timeout(60.0)  # 1 minute timeout
-            
-            with httpx.Client(timeout=timeout) as client:
-                response = client.post(url, headers=headers, params=params, json=payload)
-                
-                if response.status_code != 200:
-                    error_text = response.text[:500]
-                    raise Exception(f"Deepgram TTS API error {response.status_code}: {error_text}")
-                
-                # Save the audio data to file
-                with open(output_path, 'wb') as f:
-                    f.write(response.content)
-                
-                # Get file size
-                file_size = os.path.getsize(output_path)
-                
-                # Estimate duration (rough calculation)
-                words = len(text.split())
-                estimated_duration = words / 2.8  # Aura voices are natural speed
-                
-                logger.info(f"✅ Deepgram Aura1 TTS completed. File size: {file_size} bytes")
-                
-                return {
-                    "success": True,
-                    "audio_path": output_path,
-                    "duration": estimated_duration,
-                    "sample_rate": 24000,
-                    "file_size": file_size,
-                    "text_length": len(text),
-                    "backend": "deepgram_aura1",
-                    "voice": self.voice
-                }
+            if len(text) <= max_chunk_size:
+                # Single request for short text
+                return self._generate_single_deepgram_chunk(text, output_path)
+            else:
+                # Split text into chunks and concatenate audio
+                return self._generate_chunked_deepgram_audio(text, output_path, max_chunk_size)
                 
         except Exception as e:
             logger.error(f"❌ Deepgram Aura1 TTS generation failed: {e}")
             raise Exception(f"Deepgram Aura1 TTS generation failed: {e}")
+
+    def _generate_single_deepgram_chunk(self, text: str, output_path: str) -> Dict[str, Any]:
+        """Generate speech for a single chunk of text"""
+        import httpx
+        from config import DEEPGRAM_API_KEY
+        
+        # Deepgram TTS API endpoint
+        url = "https://api.deepgram.com/v1/speak"
+        
+        headers = {
+            "Authorization": f"Token {DEEPGRAM_API_KEY}",
+            "Content-Type": "application/json"
+        }
+        
+        # Query parameters (model, encoding, sample_rate go here)
+        params = {
+            "model": self.voice,         # Use configured voice
+            "encoding": "linear16",      # WAV format
+            "sample_rate": 24000        # High quality sample rate
+        }
+        
+        # JSON payload (only text goes here)
+        payload = {
+            "text": text
+        }
+        
+        logger.info(f"🔍 Sending single chunk to Deepgram TTS ({len(text)} chars)")
+        
+        # Use timeout for the request
+        timeout = httpx.Timeout(60.0)  # 1 minute timeout
+        
+        with httpx.Client(timeout=timeout) as client:
+            response = client.post(url, headers=headers, params=params, json=payload)
+            
+            if response.status_code != 200:
+                error_text = response.text[:500]
+                raise Exception(f"Deepgram TTS API error {response.status_code}: {error_text}")
+            
+            # Save the audio data to file
+            with open(output_path, 'wb') as f:
+                f.write(response.content)
+            
+            # Get file size
+            file_size = os.path.getsize(output_path)
+            
+            # Estimate duration (rough calculation)
+            words = len(text.split())
+            estimated_duration = words / 2.8  # Aura voices are natural speed
+            
+            logger.info(f"✅ Deepgram Aura1 TTS completed. File size: {file_size} bytes")
+            
+            return {
+                "success": True,
+                "audio_path": output_path,
+                "duration": estimated_duration,
+                "sample_rate": 24000,
+                "file_size": file_size,
+                "text_length": len(text),
+                "backend": "deepgram_aura1",
+                "voice": self.voice,
+                "chunks": 1
+            }
+
+    def _generate_chunked_deepgram_audio(self, text: str, output_path: str, max_chunk_size: int) -> Dict[str, Any]:
+        """Generate speech for long text by chunking and concatenating audio"""
+        import httpx
+        import wave
+        import tempfile
+        from config import DEEPGRAM_API_KEY
+        
+        # Split text into chunks intelligently (at sentence boundaries when possible)
+        chunks = self._split_text_into_chunks(text, max_chunk_size)
+        logger.info(f"📦 Split text into {len(chunks)} chunks")
+        
+        # Generate audio for each chunk
+        temp_files = []
+        total_duration = 0
+        
+        try:
+            for i, chunk in enumerate(chunks):
+                logger.info(f"🎤 Processing chunk {i+1}/{len(chunks)} ({len(chunk)} chars)")
+                
+                # Create temporary file for this chunk
+                temp_fd, temp_path = tempfile.mkstemp(suffix='.wav')
+                os.close(temp_fd)
+                temp_files.append(temp_path)
+                
+                # Generate audio for this chunk
+                chunk_result = self._generate_single_deepgram_chunk(chunk, temp_path)
+                if not chunk_result["success"]:
+                    raise Exception(f"Failed to generate audio for chunk {i+1}")
+                
+                total_duration += chunk_result["duration"]
+            
+            # Concatenate all audio files
+            logger.info(f"🔗 Concatenating {len(temp_files)} audio chunks")
+            self._concatenate_wav_files(temp_files, output_path)
+            
+            # Get final file size
+            file_size = os.path.getsize(output_path)
+            
+            logger.info(f"✅ Deepgram Aura1 chunked TTS completed. File size: {file_size} bytes, Duration: {total_duration:.1f}s")
+            
+            return {
+                "success": True,
+                "audio_path": output_path,
+                "duration": total_duration,
+                "sample_rate": 24000,
+                "file_size": file_size,
+                "text_length": len(text),
+                "backend": "deepgram_aura1",
+                "voice": self.voice,
+                "chunks": len(chunks)
+            }
+            
+        finally:
+            # Clean up temporary files
+            for temp_file in temp_files:
+                try:
+                    if os.path.exists(temp_file):
+                        os.unlink(temp_file)
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_file}: {e}")
+
+    def _split_text_into_chunks(self, text: str, max_size: int) -> list:
+        """Split text into chunks at sentence boundaries when possible"""
+        import re
+        
+        if len(text) <= max_size:
+            return [text]
+        
+        chunks = []
+        current_chunk = ""
+        
+        # Split by sentences first
+        sentences = re.split(r'(?<=[.!?])\s+', text)
+        
+        for sentence in sentences:
+            # If adding this sentence would exceed the limit
+            if len(current_chunk) + len(sentence) + 1 > max_size:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = sentence
+                else:
+                    # Single sentence is too long, split by words
+                    if len(sentence) > max_size:
+                        word_chunks = self._split_long_sentence(sentence, max_size)
+                        chunks.extend(word_chunks[:-1])
+                        current_chunk = word_chunks[-1]
+                    else:
+                        current_chunk = sentence
+            else:
+                if current_chunk:
+                    current_chunk += " " + sentence
+                else:
+                    current_chunk = sentence
+        
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        
+        return chunks
+
+    def _split_long_sentence(self, sentence: str, max_size: int) -> list:
+        """Split a long sentence by words"""
+        words = sentence.split()
+        chunks = []
+        current_chunk = ""
+        
+        for word in words:
+            if len(current_chunk) + len(word) + 1 > max_size:
+                if current_chunk:
+                    chunks.append(current_chunk.strip())
+                    current_chunk = word
+                else:
+                    # Single word is too long, just truncate
+                    chunks.append(word[:max_size])
+                    current_chunk = ""
+            else:
+                if current_chunk:
+                    current_chunk += " " + word
+                else:
+                    current_chunk = word
+        
+        if current_chunk:
+            chunks.append(current_chunk.strip())
+        
+        return chunks
+
+    def _concatenate_wav_files(self, input_files: list, output_file: str):
+        """Concatenate multiple WAV files into one"""
+        import wave
+        
+        if not input_files:
+            raise Exception("No input files to concatenate")
+        
+        # Open the first file to get parameters
+        with wave.open(input_files[0], 'rb') as first_wav:
+            params = first_wav.getparams()
+            frames = first_wav.readframes(first_wav.getnframes())
+        
+        # Open output file for writing
+        with wave.open(output_file, 'wb') as output_wav:
+            output_wav.setparams(params)
+            output_wav.writeframes(frames)
+            
+            # Append remaining files
+            for input_file in input_files[1:]:
+                with wave.open(input_file, 'rb') as wav_file:
+                    # Verify parameters match
+                    if wav_file.getparams()[:4] != params[:4]:
+                        logger.warning(f"WAV parameters mismatch in {input_file}, attempting to concatenate anyway")
+                    
+                    frames = wav_file.readframes(wav_file.getnframes())
+                    output_wav.writeframes(frames)
 
     
     async def generate_speech(self, text: str, output_dir: str = None) -> Dict[str, Any]:
