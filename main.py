@@ -140,6 +140,55 @@ async def pydantic_validation_exception_handler(request: Request, exc: Validatio
         }
     )
 
+# User-friendly HTTPException and generic exception handlers
+from fastapi import HTTPException as FastAPIHTTPException
+
+@app.exception_handler(FastAPIHTTPException)
+async def http_exception_handler(request: Request, exc: FastAPIHTTPException):
+    """Return user-friendly messages for HTTP errors while logging technical details."""
+    try:
+        logger.error(f"HTTPException on {request.method} {request.url}: {exc.detail}")
+    except Exception:
+        logger.error(f"HTTPException on {request.method} {request.url}")
+
+    status_code = getattr(exc, 'status_code', 500) or 500
+    detail = getattr(exc, 'detail', None)
+
+    # Preserve structured details (dict) to avoid breaking clients relying on fields
+    if isinstance(detail, dict):
+        return JSONResponse(status_code=status_code, content=detail)
+
+    # Map common statuses to friendly messages
+    friendly_messages = {
+        400: "We couldn't process your request. Please check the information and try again.",
+        401: "Please sign in to continue.",
+        402: "Your current plan doesn't include this feature. Please upgrade to continue.",
+        403: "You don’t have permission to do that.",
+        404: "We couldn't find what you're looking for.",
+        405: "This action isn't allowed.",
+        408: "The request timed out. Please try again.",
+        409: "There’s a conflict with your request. Please refresh and try again.",
+        413: "This is too large to process. Please try a smaller file.",
+        415: "This file type isn’t supported.",
+        429: "You’ve reached the current rate limit. Please wait and try again.",
+        500: "Something went wrong on our side. Please try again in a moment.",
+        502: "The service is temporarily unavailable. Please try again shortly.",
+        503: "The service is temporarily unavailable. Please try again shortly.",
+        504: "The request took too long. Please try again.",
+    }
+
+    message = friendly_messages.get(status_code, "We ran into a problem. Please try again.")
+    return JSONResponse(status_code=status_code, content={"detail": message})
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    """Catch-all handler to avoid exposing technical errors to users."""
+    logger.error(f"Unhandled error on {request.method} {request.url}: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Something went wrong on our side. Please try again in a moment."}
+    )
+
 # Startup event to initialize services
 @app.on_event("startup")
 async def startup_event():
@@ -1518,8 +1567,8 @@ async def get_user_bookmarks(
         bookmark_limits = {
             'free': 10,
             'student': 50,
-            'researcher': 200,
-            'expert': 1000
+            'researcher': 100,
+            'expert': 500
         }
         
         user_plan = 'free'  # default
@@ -1537,6 +1586,21 @@ async def get_user_bookmarks(
         
         logger.info(f"✅ Retrieved {len(bookmarks)} bookmarks for user: {user_id}")
         
+        # Compute eligible (user-created) bookmarks for limits (exclude auto-generated/system)
+        eligible_count = 0
+        try:
+            for bookmark in bookmarks:
+                md = bookmark.get('metadata', {}) if isinstance(bookmark, dict) else {}
+                auto_gen = (
+                    md.get('auto_generated') is True or
+                    md.get('created_from') == 'video_processing' or
+                    str(bookmark.get('bookmark_id', '')).startswith('auto_')
+                )
+                if not auto_gen:
+                    eligible_count += 1
+        except Exception:
+            eligible_count = len(bookmarks)
+        
         return {
             "status": "success",
             "success": True,
@@ -1544,10 +1608,10 @@ async def get_user_bookmarks(
             "count": len(bookmarks),
             "user_id": user_id,
             "limits": {
-                "current_count": len(bookmarks),
+                "current_count": eligible_count,
                 "max_bookmarks": max_bookmarks,
                 "user_plan": user_plan,
-                "remaining": max(0, max_bookmarks - len(bookmarks))
+                "remaining": max(0, max_bookmarks - eligible_count)
             }
         }
         
@@ -1608,17 +1672,29 @@ async def create_bookmark(
                 bookmark_limits = {
                     'free': 10,
                     'student': 50,
-                    'researcher': 200,
-                    'expert': 1000
+                    'researcher': 100,
+                    'expert': 500
                 }
                 
                 max_bookmarks = bookmark_limits.get(user_plan, 10)
                 
-                # Get current bookmark count
+                # Get current bookmark count (exclude auto-generated/system bookmarks)
                 current_bookmarks = r2_storage.get_user_bookmarks(user_id=user_id, limit=1000)
-                current_count = len(current_bookmarks)
+                eligible_count = 0
+                try:
+                    for bookmark in current_bookmarks:
+                        md = bookmark.get('metadata', {}) if isinstance(bookmark, dict) else {}
+                        auto_gen = (
+                            md.get('auto_generated') is True or
+                            md.get('created_from') == 'video_processing' or
+                            str(bookmark.get('bookmark_id', '')).startswith('auto_')
+                        )
+                        if not auto_gen:
+                            eligible_count += 1
+                except Exception:
+                    eligible_count = len(current_bookmarks)
                 
-                if current_count >= max_bookmarks:
+                if eligible_count >= max_bookmarks:
                     plan_names = {
                         'free': 'Free',
                         'student': 'Student',
@@ -1630,14 +1706,14 @@ async def create_bookmark(
                         status_code=402,
                         detail={
                             "message": f"Bookmark limit reached. {plan_names.get(user_plan, 'Free')} plan allows {max_bookmarks} bookmarks.",
-                            "current_count": current_count,
+                            "current_count": eligible_count,
                             "max_bookmarks": max_bookmarks,
                             "user_plan": user_plan,
                             "upgrade_required": user_plan == 'free'
                         }
                     )
                 
-                logger.info(f"🔖 Bookmark limit check passed: {current_count}/{max_bookmarks} for {user_plan} plan")
+                logger.info(f"🔖 Bookmark limit check passed: {eligible_count}/{max_bookmarks} for {user_plan} plan")
                 
             except HTTPException:
                 raise
