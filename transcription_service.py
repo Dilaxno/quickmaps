@@ -6,6 +6,7 @@ Deepgram-only transcription (model: whisper-large by default).
 
 import json
 import logging
+import time
 from typing import Dict, Any
 
 from config import (
@@ -67,10 +68,82 @@ class TranscriptionService:
             
         return segments
 
-
+    def _transcribe_with_deepgram_http(self, audio_path: str) -> Dict[str, Any]:
+        """Fallback method using direct HTTP requests to Deepgram API"""
+        import httpx
+        from pathlib import Path
+        
+        try:
+            logger.info("🔄 Using HTTP fallback for Deepgram transcription...")
+            
+            with open(audio_path, 'rb') as f:
+                audio_data = f.read()
+            
+            # Detect content type based on file extension
+            file_ext = Path(audio_path).suffix.lower()
+            content_type_map = {
+                '.wav': 'audio/wav',
+                '.mp3': 'audio/mpeg',
+                '.m4a': 'audio/mp4',
+                '.flac': 'audio/flac',
+                '.ogg': 'audio/ogg',
+                '.aac': 'audio/aac'
+            }
+            content_type = content_type_map.get(file_ext, 'audio/wav')
+            
+            headers = {
+                'Authorization': f'Token {DEEPGRAM_API_KEY}',
+                'Content-Type': content_type
+            }
+            
+            params = {
+                'model': DEEPGRAM_MODEL or 'whisper-large',
+                'smart_format': 'true',
+                'punctuate': 'true',
+                'paragraphs': 'true',
+                'utterances': 'false',
+                'diarize': 'false'
+            }
+            
+            logger.info(f"📡 Making HTTP request to Deepgram API (Content-Type: {content_type})")
+            
+            # Use longer timeout for HTTP request
+            timeout = httpx.Timeout(300.0)  # 5 minutes
+            
+            with httpx.Client(timeout=timeout) as client:
+                response = client.post(
+                    'https://api.deepgram.com/v1/listen',
+                    headers=headers,
+                    params=params,
+                    content=audio_data
+                )
+                
+                logger.info(f"📥 HTTP response status: {response.status_code}")
+                
+                if response.status_code != 200:
+                    error_text = response.text[:500]  # Limit error text length
+                    raise Exception(f"HTTP {response.status_code}: {error_text}")
+                
+                result = response.json()
+                logger.info("✅ Successfully parsed JSON response")
+                
+                # Parse the JSON response
+                alt = result.get('results', {}).get('channels', [{}])[0].get('alternatives', [{}])[0]
+                text = alt.get('transcript', '')
+                language = alt.get('detected_language', 'en') or 'en'
+                
+                words = alt.get('words', [])
+                segments = self._build_segments_from_words(words)
+                
+                logger.info(f"✅ HTTP transcription completed. Text length: {len(text)} chars, Segments: {len(segments)}")
+                return {"text": text, "segments": segments, "language": language}
+                
+        except Exception as e:
+            logger.error(f"❌ HTTP fallback failed: {e}")
+            raise
 
     def _transcribe_with_deepgram(self, audio_path: str) -> Dict[str, Any]:
-        """Call Deepgram prerecorded transcription with whisper-large"""
+        """Call Deepgram prerecorded transcription with whisper-large using SDK v4.x"""
         try:
             from deepgram import DeepgramClient, PrerecordedOptions, FileSource
         except Exception as e:
@@ -80,13 +153,20 @@ class TranscriptionService:
 
         try:
             logger.info(f"🎤 Starting Deepgram transcription with model: {DEEPGRAM_MODEL or 'whisper-large'}")
-            client = DeepgramClient(DEEPGRAM_API_KEY) if DEEPGRAM_API_KEY else DeepgramClient()
-
+            
+            # Create client - SDK v4.x uses different initialization
+            client = DeepgramClient(DEEPGRAM_API_KEY)
+            
             with open(audio_path, 'rb') as f:
                 buffer_data = f.read()
                 logger.info(f"📁 Audio file size: {len(buffer_data)} bytes")
-                source: FileSource = {"buffer": buffer_data}
+                
+                # Check file size and warn if very large
+                file_size_mb = len(buffer_data) / (1024 * 1024)
+                if file_size_mb > 100:
+                    logger.warning(f"⚠️ Large audio file ({file_size_mb:.1f}MB) - transcription may take longer")
 
+            # SDK v4.x options
             options = PrerecordedOptions(
                 model=DEEPGRAM_MODEL or "whisper-large",
                 smart_format=True,
@@ -98,52 +178,83 @@ class TranscriptionService:
             
             logger.info("🔄 Sending request to Deepgram...")
 
-            resp = client.listen.rest.v("1").transcribe_file(source, options)
-            logger.info(f"📥 Received response from Deepgram. Type: {type(resp)}")
+            # SDK v4.x API call
+            payload = {"buffer": buffer_data}
             
-            # Handle both dictionary and object responses
+            # Try transcription with retry logic
+            max_retries = 3
+            retry_count = 0
+            response = None
+            
+            while retry_count < max_retries:
+                try:
+                    response = client.listen.prerecorded.v("1").transcribe_file(payload, options)
+                    logger.info(f"📥 Received response from Deepgram. Type: {type(response)}")
+                    break
+                except Exception as retry_error:
+                    retry_count += 1
+                    if "timeout" in str(retry_error).lower() and retry_count < max_retries:
+                        logger.warning(f"⚠️ Timeout on attempt {retry_count}/{max_retries}, retrying...")
+                        time.sleep(2)  # Wait before retry
+                        continue
+                    else:
+                        raise retry_error
+            
+            if response is None:
+                raise Exception("Failed to get response from Deepgram after retries")
+            
+            # Parse response - SDK v4.x returns different structure
             text = ''
             language = 'en'
             segments = []
             
             try:
-                # Try object-style access first (newer SDK)
-                if hasattr(resp, 'results') and resp.results:
-                    channel = resp.results.channels[0] if resp.results.channels else None
-                    if channel and channel.alternatives:
-                        alt = channel.alternatives[0]
-                        text = getattr(alt, 'transcript', '')
-                        language = getattr(alt, 'detected_language', 'en') or 'en'
-                        
-                        # Build segments from words if available
-                        words = getattr(alt, 'words', []) or []
-                        segments = self._build_segments_from_words(words)
-                        
-                elif hasattr(resp, 'to_dict'):
-                    # Try converting to dict if available
-                    resp_dict = resp.to_dict()
+                # SDK v4.x response parsing
+                if hasattr(response, 'results'):
+                    results = response.results
+                    if hasattr(results, 'channels') and results.channels:
+                        channel = results.channels[0]
+                        if hasattr(channel, 'alternatives') and channel.alternatives:
+                            alt = channel.alternatives[0]
+                            text = getattr(alt, 'transcript', '')
+                            
+                            # Get language
+                            if hasattr(alt, 'detected_language'):
+                                language = alt.detected_language or 'en'
+                            elif hasattr(results, 'metadata') and hasattr(results.metadata, 'detected_language'):
+                                language = results.metadata.detected_language or 'en'
+                            
+                            # Build segments from words if available
+                            words = getattr(alt, 'words', []) or []
+                            segments = self._build_segments_from_words(words)
+                
+                # Fallback: try to convert to dict if object access fails
+                elif hasattr(response, 'to_dict'):
+                    resp_dict = response.to_dict()
                     alt = resp_dict.get('results', {}).get('channels', [{}])[0].get('alternatives', [{}])[0]
                     text = alt.get('transcript', '')
                     language = alt.get('detected_language', 'en') or 'en'
-                    
                     words = alt.get('words', [])
                     segments = self._build_segments_from_words(words)
-                    
+                
+                # Last resort: try dictionary access
                 else:
-                    # Fallback: try dictionary access (older SDK)
-                    alt = resp.get('results', {}).get('channels', [{}])[0].get('alternatives', [{}])[0]
+                    logger.warning("⚠️ Using fallback dictionary access for response")
+                    alt = response['results']['channels'][0]['alternatives'][0]
                     text = alt.get('transcript', '')
                     language = alt.get('detected_language', 'en') or 'en'
-                    
                     words = alt.get('words', [])
                     segments = self._build_segments_from_words(words)
                     
             except Exception as parse_error:
                 logger.warning(f"⚠️ Error parsing Deepgram response: {parse_error}")
+                logger.warning(f"Response type: {type(response)}")
+                logger.warning(f"Response dir: {dir(response)}")
+                
                 # Try to extract basic text at least
                 try:
-                    if hasattr(resp, 'results'):
-                        text = str(resp.results.channels[0].alternatives[0].transcript)
+                    if hasattr(response, 'results'):
+                        text = str(response.results.channels[0].alternatives[0].transcript)
                     else:
                         text = "Transcription completed but text extraction failed"
                 except:
@@ -153,17 +264,34 @@ class TranscriptionService:
             return {"text": text, "segments": segments, "language": language}
             
         except Exception as e:
-            logger.error(f"❌ Deepgram transcription failed: {str(e)}")
-            logger.error(f"Response type: {type(resp) if 'resp' in locals() else 'No response'}")
-            if 'resp' in locals():
-                logger.error(f"Response attributes: {dir(resp)}")
+            logger.error(f"❌ Deepgram SDK transcription failed: {str(e)}")
+            logger.error(f"Response type: {type(response) if 'response' in locals() else 'No response'}")
+            
+            # Check if it's a timeout error and try HTTP fallback
+            if "timeout" in str(e).lower():
+                logger.info("🔄 Attempting HTTP fallback due to timeout...")
+                try:
+                    return self._transcribe_with_deepgram_http(audio_path)
+                except Exception as fallback_error:
+                    logger.error(f"❌ HTTP fallback also failed: {fallback_error}")
+                    raise Exception(f"Both SDK and HTTP methods failed. SDK: {e}, HTTP: {fallback_error}")
+            
             raise Exception(f"Deepgram transcription failed: {e}")
 
     def transcribe_audio(self, audio_path: str) -> Dict[str, Any]:
-        """Transcribe audio using Deepgram"""
+        """Transcribe audio using Deepgram with fallback"""
         if not self.use_deepgram:
             raise Exception("Deepgram is not configured. Set USE_DEEPGRAM=true and provide DEEPGRAM_API_KEY in .env")
-        return self._transcribe_with_deepgram(audio_path)
+        
+        try:
+            return self._transcribe_with_deepgram(audio_path)
+        except Exception as e:
+            # If SDK fails, try HTTP fallback
+            if "timeout" in str(e).lower() or "PrerecordedResponse" in str(e):
+                logger.warning(f"⚠️ SDK method failed ({e}), trying HTTP fallback...")
+                return self._transcribe_with_deepgram_http(audio_path)
+            else:
+                raise e
 
     def is_available(self) -> bool:
         """Check if the transcription service is available"""

@@ -8,8 +8,8 @@ yt-dlp>=2025.08.11
 torch>=2.1.0
 orjson>=3.10.0
 
-# Deepgram SDK for cloud Whisper
-deepgram-sdk>=3.0.0
+# Deepgram SDK for cloud Whisper (v4.x has different API)
+deepgram-sdk>=4.0.0
 
 torchaudio>=2.1.0
 numpy>=1.26.0,<3.0.0
