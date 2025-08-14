@@ -31,7 +31,22 @@ class TTSService:
         """Check which TTS backends are available"""
         self.available_backends = []
         
-        # Check for gTTS (preferred - Google's reliable online TTS)
+        # Check for Deepgram Aura1 TTS (preferred - high quality neural TTS)
+        try:
+            from config import DEEPGRAM_API_KEY
+            logger.debug(f"Checking Deepgram API key: {'***' if DEEPGRAM_API_KEY else 'None'}")
+            if DEEPGRAM_API_KEY:
+                from deepgram import DeepgramClient
+                self.available_backends.append("deepgram_aura1")
+                logger.info("✅ Deepgram Aura1 TTS backend available")
+            else:
+                logger.info("⚠️ Deepgram TTS not available - no API key configured")
+        except ImportError as e:
+            logger.info(f"⚠️ Deepgram TTS not available - missing dependency: {e}")
+        except Exception as e:
+            logger.info(f"⚠️ Deepgram TTS check failed: {e}")
+        
+        # Check for gTTS (fallback - Google's reliable online TTS)
         try:
             import gtts
             self.available_backends.append("gtts")
@@ -61,8 +76,10 @@ class TTSService:
             if not self.available_backends:
                 raise Exception("No TTS backends available. Please install gtts, pyttsx3, or other compatible TTS libraries.")
             
-            # Try to initialize backends in order of preference (gTTS first)
-            if "gtts" in self.available_backends:
+            # Try to initialize backends in order of preference (Deepgram Aura1 first)
+            if "deepgram_aura1" in self.available_backends:
+                self._initialize_deepgram_aura1()
+            elif "gtts" in self.available_backends:
                 self._initialize_gtts()
             elif "pyttsx3" in self.available_backends:
                 self._initialize_pyttsx3()
@@ -98,6 +115,16 @@ class TTSService:
         
         logger.info("pyttsx3 TTS engine initialized")
 
+    def _initialize_deepgram_aura1(self):
+        """Initialize Deepgram Aura1 TTS backend"""
+        from deepgram import DeepgramClient
+        from config import DEEPGRAM_API_KEY
+        
+        self.pipeline = DeepgramClient(DEEPGRAM_API_KEY)
+        self.backend = "deepgram_aura1"
+        self.voice = "aura-asteria-en"  # Default to Asteria voice (female, American English)
+        logger.info("Deepgram Aura1 TTS backend initialized with Asteria voice")
+
     def _initialize_gtts(self):
         """Initialize gTTS backend"""
         # gTTS doesn't need initialization, just import check
@@ -107,6 +134,98 @@ class TTSService:
         self.voice = "en-us"
         logger.info("gTTS backend initialized with American English voice")
 
+    def set_voice(self, voice_name: str) -> bool:
+        """Set the voice for TTS generation"""
+        try:
+            if self.backend == "deepgram_aura1":
+                # Available Deepgram Aura voices
+                available_voices = [
+                    "aura-asteria-en",   # female, American English (default)
+                    "aura-luna-en",      # female, American English
+                    "aura-stella-en",    # female, American English
+                    "aura-athena-en",    # female, British English
+                    "aura-hera-en",      # female, American English
+                    "aura-orion-en",     # male, American English
+                    "aura-arcas-en",     # male, American English
+                    "aura-perseus-en",   # male, American English
+                    "aura-angus-en",     # male, Irish English
+                    "aura-orpheus-en",   # male, American English
+                    "aura-helios-en",    # male, British English
+                    "aura-zeus-en"       # male, American English
+                ]
+                
+                if voice_name in available_voices:
+                    self.voice = voice_name
+                    logger.info(f"✅ Deepgram voice set to: {voice_name}")
+                    return True
+                else:
+                    logger.warning(f"⚠️ Voice '{voice_name}' not available for Deepgram. Available: {available_voices}")
+                    return False
+                    
+            elif self.backend == "gtts":
+                # gTTS language codes
+                if voice_name in ["en-us", "en-uk", "en-au", "en-ca", "en-in"]:
+                    self.voice = voice_name
+                    logger.info(f"✅ gTTS voice set to: {voice_name}")
+                    return True
+                else:
+                    logger.warning(f"⚠️ Voice '{voice_name}' not supported for gTTS")
+                    return False
+                    
+            elif self.backend == "pyttsx3":
+                # pyttsx3 uses system voices
+                voices = self.pipeline.getProperty('voices')
+                for voice in voices:
+                    if voice_name.lower() in voice.name.lower():
+                        self.pipeline.setProperty('voice', voice.id)
+                        self.voice = voice_name
+                        logger.info(f"✅ pyttsx3 voice set to: {voice_name}")
+                        return True
+                logger.warning(f"⚠️ Voice '{voice_name}' not found in pyttsx3")
+                return False
+                
+            else:
+                logger.warning(f"⚠️ Voice setting not supported for backend: {self.backend}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to set voice '{voice_name}': {e}")
+            return False
+
+    def get_available_voices(self) -> list:
+        """Get list of available voices for current backend"""
+        try:
+            if self.backend == "deepgram_aura1":
+                return [
+                    {"id": "aura-asteria-en", "name": "Asteria", "gender": "female", "accent": "American English"},
+                    {"id": "aura-luna-en", "name": "Luna", "gender": "female", "accent": "American English"},
+                    {"id": "aura-stella-en", "name": "Stella", "gender": "female", "accent": "American English"},
+                    {"id": "aura-athena-en", "name": "Athena", "gender": "female", "accent": "British English"},
+                    {"id": "aura-hera-en", "name": "Hera", "gender": "female", "accent": "American English"},
+                    {"id": "aura-orion-en", "name": "Orion", "gender": "male", "accent": "American English"},
+                    {"id": "aura-arcas-en", "name": "Arcas", "gender": "male", "accent": "American English"},
+                    {"id": "aura-perseus-en", "name": "Perseus", "gender": "male", "accent": "American English"},
+                    {"id": "aura-angus-en", "name": "Angus", "gender": "male", "accent": "Irish English"},
+                    {"id": "aura-orpheus-en", "name": "Orpheus", "gender": "male", "accent": "American English"},
+                    {"id": "aura-helios-en", "name": "Helios", "gender": "male", "accent": "British English"},
+                    {"id": "aura-zeus-en", "name": "Zeus", "gender": "male", "accent": "American English"}
+                ]
+            elif self.backend == "gtts":
+                return [
+                    {"id": "en-us", "name": "American English", "gender": "neutral", "accent": "American"},
+                    {"id": "en-uk", "name": "British English", "gender": "neutral", "accent": "British"},
+                    {"id": "en-au", "name": "Australian English", "gender": "neutral", "accent": "Australian"},
+                    {"id": "en-ca", "name": "Canadian English", "gender": "neutral", "accent": "Canadian"},
+                    {"id": "en-in", "name": "Indian English", "gender": "neutral", "accent": "Indian"}
+                ]
+            elif self.backend == "pyttsx3":
+                voices = self.pipeline.getProperty('voices')
+                return [{"id": voice.id, "name": voice.name, "gender": "unknown", "accent": "system"} for voice in voices]
+            else:
+                return []
+        except Exception as e:
+            logger.error(f"❌ Failed to get available voices: {e}")
+            return []
 
     
     def is_available(self) -> bool:
@@ -114,6 +233,9 @@ class TTSService:
         if self.backend in ["gtts"]:
             # gTTS doesn't need special pipeline checks
             return self.is_initialized
+        elif self.backend == "deepgram_aura1":
+            # Deepgram needs client and API key
+            return self.is_initialized and self.pipeline is not None
         else:
             return self.is_initialized and self.pipeline is not None
     
@@ -134,7 +256,9 @@ class TTSService:
             
             logger.info(f"Generating speech for {len(text)} characters using {self.backend} backend")
             
-            if self.backend == "gtts":
+            if self.backend == "deepgram_aura1":
+                return self._generate_with_deepgram_aura1(text, output_path)
+            elif self.backend == "gtts":
                 return self._generate_with_gtts(text, output_path)
             elif self.backend == "pyttsx3":
                 return self._generate_with_pyttsx3(text, output_path)
@@ -165,7 +289,9 @@ class TTSService:
             
             logger.info(f"Generating speech for {len(text)} characters using {self.backend} backend")
             
-            if self.backend == "pyttsx3":
+            if self.backend == "deepgram_aura1":
+                return self._generate_with_deepgram_aura1(text, output_path)
+            elif self.backend == "pyttsx3":
                 return self._generate_with_pyttsx3(text, output_path)
             elif self.backend == "gtts":
                 return self._generate_with_gtts(text, output_path)
@@ -237,6 +363,80 @@ class TTSService:
         except Exception as e:
             raise Exception(f"gTTS generation failed: {e}")
 
+    def _generate_with_deepgram_aura1(self, text: str, output_path: str) -> Dict[str, Any]:
+        """Generate speech using Deepgram Aura1 TTS"""
+        try:
+            import httpx
+            from config import DEEPGRAM_API_KEY
+            
+            logger.info(f"🎤 Generating TTS with Deepgram Aura1 voice: {self.voice}")
+            
+            # Deepgram TTS API endpoint
+            url = "https://api.deepgram.com/v1/speak"
+            
+            headers = {
+                "Authorization": f"Token {DEEPGRAM_API_KEY}",
+                "Content-Type": "application/json"
+            }
+            
+            # Available Aura voices:
+            # aura-asteria-en (female, American English)
+            # aura-luna-en (female, American English) 
+            # aura-stella-en (female, American English)
+            # aura-athena-en (female, British English)
+            # aura-hera-en (female, American English)
+            # aura-orion-en (male, American English)
+            # aura-arcas-en (male, American English)
+            # aura-perseus-en (male, American English)
+            # aura-angus-en (male, Irish English)
+            # aura-orpheus-en (male, American English)
+            # aura-helios-en (male, British English)
+            # aura-zeus-en (male, American English)
+            
+            payload = {
+                "text": text,
+                "model": self.voice,         # Use configured voice
+                "encoding": "linear16",      # WAV format
+                "sample_rate": 24000        # High quality sample rate
+            }
+            
+            # Use timeout for the request
+            timeout = httpx.Timeout(60.0)  # 1 minute timeout
+            
+            with httpx.Client(timeout=timeout) as client:
+                response = client.post(url, headers=headers, json=payload)
+                
+                if response.status_code != 200:
+                    error_text = response.text[:500]
+                    raise Exception(f"Deepgram TTS API error {response.status_code}: {error_text}")
+                
+                # Save the audio data to file
+                with open(output_path, 'wb') as f:
+                    f.write(response.content)
+                
+                # Get file size
+                file_size = os.path.getsize(output_path)
+                
+                # Estimate duration (rough calculation)
+                words = len(text.split())
+                estimated_duration = words / 2.8  # Aura voices are natural speed
+                
+                logger.info(f"✅ Deepgram Aura1 TTS completed. File size: {file_size} bytes")
+                
+                return {
+                    "success": True,
+                    "audio_path": output_path,
+                    "duration": estimated_duration,
+                    "sample_rate": 24000,
+                    "file_size": file_size,
+                    "text_length": len(text),
+                    "backend": "deepgram_aura1",
+                    "voice": self.voice
+                }
+                
+        except Exception as e:
+            logger.error(f"❌ Deepgram Aura1 TTS generation failed: {e}")
+            raise Exception(f"Deepgram Aura1 TTS generation failed: {e}")
 
     
     async def generate_speech(self, text: str, output_dir: str = None) -> Dict[str, Any]:
@@ -488,49 +688,23 @@ class TTSService:
                 "description": "Google's cloud-based text-to-speech service",
                 "license": "Google"
             })
+        elif self.backend == "deepgram_aura1":
+            info.update({
+                "model_name": "Deepgram Aura1",
+                "voice": self.voice,
+                "description": "Deepgram's high-quality neural text-to-speech with Aura voices",
+                "license": "Deepgram",
+                "quality": "High (24kHz)"
+            })
         elif self.backend == "pyttsx3":
             info.update({
                 "model_name": "pyttsx3 (System TTS)",
                 "description": "Cross-platform offline text-to-speech"
             })
-        elif self.backend == "gtts":
-            info.update({
-                "model_name": "Google Text-to-Speech",
-                "description": "Google's online text-to-speech service"
-            })
         
         return info
     
-    def set_voice(self, voice: str) -> bool:
-        """Set voice/language for TTS (gTTS backend only)"""
-        if self.backend == "gtts":
-            self.voice = voice
-            logger.info(f"Language set to: {voice}")
-            return True
-        else:
-            logger.warning(f"Voice setting not supported for {self.backend} backend")
-            return False
-    
-    def get_available_voices(self) -> list:
-        """Get list of available voices/languages"""
-        if self.backend == "gtts":
-            # Popular gTTS languages
-            return [
-                "en",      # English
-                "en-us",   # English (US)
-                "en-uk",   # English (UK)
-                "en-au",   # English (Australia)
-                "es",      # Spanish
-                "fr",      # French
-                "de",      # German
-                "it",      # Italian
-                "pt",      # Portuguese
-                "ru",      # Russian
-                "ja",      # Japanese
-                "ko",      # Korean
-                "zh",      # Chinese
-            ]
-        return []
+
 
 # Global TTS service instance
 tts_service = TTSService()

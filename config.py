@@ -46,22 +46,30 @@ class Config:
     def _validate_config(self):
         """Validate configuration settings"""
         errors = []
+        warnings = []
         
-        # Validate Deepgram configuration
+        # Validate Deepgram configuration (warning only for TTS compatibility)
         if self.USE_DEEPGRAM and not self.DEEPGRAM_API_KEY:
-            errors.append("DEEPGRAM_API_KEY is required when USE_DEEPGRAM is enabled")
+            warnings.append("DEEPGRAM_API_KEY is missing - Deepgram transcription and TTS will not be available")
         
-        # Validate Groq configuration
+        # Validate Groq configuration (warning only)
         if self.ENABLE_NOTES_GENERATION and not self.GROQ_API_KEY:
-            errors.append("GROQ_API_KEY is required when ENABLE_NOTES_GENERATION is enabled")
+            warnings.append("GROQ_API_KEY is missing - notes generation will not be available")
         
-        # Validate basic settings
+        # Validate basic settings (these are actual errors)
         if self.MAX_WORKERS < 1:
             errors.append("MAX_WORKERS must be at least 1")
         
         if self.MAX_FILE_SIZE < 1024 * 1024:  # 1MB minimum
             errors.append("MAX_FILE_SIZE must be at least 1MB")
         
+        # Print warnings
+        if warnings:
+            print("⚠️ Configuration warnings:")
+            for warning in warnings:
+                print(f"   - {warning}")
+        
+        # Only raise errors for critical issues
         if errors:
             raise ValueError("Configuration errors: " + "; ".join(errors))
     
