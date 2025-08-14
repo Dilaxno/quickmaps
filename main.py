@@ -53,6 +53,7 @@ from diagram_generator import diagram_generator
 from cloud_storage_service import cloud_storage_service
 from video_validation_service import video_validation_service
 from semantic_search_service import semantic_search_service
+from ocr_service import ocr_service
 
 # Import new utility services
 from routes import affiliate_routes
@@ -660,6 +661,106 @@ async def upload_audio(
         logger.error(f"Audio upload failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to upload audio file. Please try again.")
 
+# Page scan endpoint
+@app.post("/process-page-scan/")
+async def process_page_scan(
+    background_tasks: BackgroundTasks,
+    images: list[UploadFile] = File(...),
+    request: Request = None,
+):
+    """Handle multiple image upload for page scanning and OCR processing"""
+    
+    # Validate number of images
+    if len(images) == 0:
+        raise HTTPException(status_code=400, detail="No images provided. Please upload at least one image.")
+    
+    if len(images) > 20:
+        raise HTTPException(status_code=400, detail="Too many images. Please upload no more than 20 images at once.")
+    
+    # Validate each image
+    supported_formats = ocr_service.get_supported_formats()
+    max_size = 10 * 1024 * 1024  # 10MB per image
+    
+    for i, image in enumerate(images):
+        # Check file extension
+        file_extension = Path(image.filename).suffix.lower()
+        if file_extension not in supported_formats:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Image {i+1} ({image.filename}) has unsupported format. Supported formats: {', '.join(supported_formats)}"
+            )
+        
+        # Check file size
+        if image.size and image.size > max_size:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Image {i+1} ({image.filename}) is too large. Please upload images smaller than 10MB."
+            )
+        
+        # Verify it's actually an image
+        if not image.content_type or not image.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=400,
+                detail=f"File {i+1} ({image.filename}) is not a valid image file."
+            )
+    
+    # Extract user information from Firebase token
+    user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+    
+    # Only check if user has credits (don't deduct yet)
+    if user_id and db:
+        from credit_service import CreditAction
+        credit_result = await credit_service.check_credits(
+            user_id=user_id,
+            action=CreditAction.PDF_UPLOAD  # Use PDF_UPLOAD action for page scanning
+        )
+        
+        if not credit_result.has_credits:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Insufficient credits. {credit_result.message}"
+            )
+    
+    # Create job
+    job_id = job_manager.create_job(
+        user_id=user_id,
+        user_email=user_email,
+        user_name=user_name,
+        action_type="PAGE_SCAN"
+    )
+    
+    try:
+        # Save uploaded images temporarily
+        image_paths = []
+        for i, image in enumerate(images):
+            # Create unique filename for each image
+            file_extension = Path(image.filename).suffix.lower()
+            safe_filename = f"{job_id}_page_{i+1:03d}{file_extension}"
+            file_path = UPLOAD_DIR / safe_filename
+            
+            # Save image
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(image.file, buffer)
+            
+            image_paths.append(str(file_path))
+        
+        # Set job to processing status before starting background task
+        job_manager.update_job_status(job_id, "processing", f"Starting OCR processing for {len(images)} images...")
+        
+        # Start background processing
+        background_tasks.add_task(processing_service.process_page_scan, job_id, image_paths, user_id)
+        
+        return {
+            "job_id": job_id, 
+            "message": f"Successfully uploaded {len(images)} images. OCR processing started.",
+            "image_count": len(images)
+        }
+    
+    except Exception as e:
+        job_manager.set_job_error(job_id, str(e))
+        logger.error(f"Page scan upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload images for page scanning. Please try again.")
+
 # Job status endpoint
 @app.get("/status/{job_id}")
 async def get_job_status(job_id: str):
@@ -1253,8 +1354,28 @@ async def generate_diagram_for_job(
                 detail="Diagram generation service is not available. Please check API configuration."
             )
         
-        # Validate diagram type
-        valid_types = ["flowchart", "mindmap", "sequence", "process", "graph"]
+        # Validate diagram type - expanded to align with frontend Mermaid types
+        valid_types = [
+            "flowchart",
+            "graph",
+            "sequenceDiagram",
+            "classDiagram",
+            "stateDiagram",
+            "stateDiagram-v2",
+            "erDiagram",
+            "journey",
+            "gantt",
+            "pie",
+            "gitGraph",
+            "timeline",
+            "requirementDiagram",
+            "quadrantChart",
+            "sankey",
+            "mindmap",
+            # legacy/internal aliases kept for backward compatibility
+            "sequence",
+            "process",
+        ]
         if diagram_type not in valid_types:
             raise HTTPException(
                 status_code=400, 

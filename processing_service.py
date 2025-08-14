@@ -8,6 +8,7 @@ import os
 import time
 import asyncio
 import logging
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any
@@ -349,6 +350,146 @@ class ProcessingService:
             job_manager.set_job_error(job_id, str(e))
             if CLEANUP_TEMP_FILES:
                 file_utils.cleanup_temp_files(job_id, pdf_path)
+    
+    async def process_page_scan(self, job_id: str, image_paths: list, user_id: Optional[str] = None):
+        """
+        Process scanned page images using OCR and generate structured notes
+        
+        Args:
+            job_id (str): Job ID
+            image_paths (list): List of paths to image files
+            user_id (str, optional): User ID for credit tracking
+        """
+        start_time = time.time()
+        
+        try:
+            job_manager.update_job_progress(job_id, f"Processing {len(image_paths)} scanned pages...")
+            
+            # Import OCR service
+            from ocr_service import ocr_service
+            
+            # Check if OCR service is available
+            if not ocr_service.is_available():
+                raise Exception("OCR service is not available. Please check PaddleOCR installation.")
+            
+            # Process all images with OCR
+            loop = asyncio.get_event_loop()
+            ocr_results = await loop.run_in_executor(
+                executor,
+                ocr_service.process_multiple_images,
+                image_paths
+            )
+            
+            # Check if we got any text
+            if not ocr_results['total_text'] or len(ocr_results['total_text'].strip()) < 50:
+                raise Exception("No readable text was found in the uploaded images. Please ensure the images are clear and contain readable text.")
+            
+            # Save OCR results
+            ocr_results_file = OUTPUT_DIR / f"{job_id}_ocr_results.json"
+            file_utils.write_file_safely(str(ocr_results_file), json.dumps(ocr_results, indent=2))
+            
+            # Save extracted text
+            extracted_text_file = OUTPUT_DIR / f"{job_id}_extracted_text.txt"
+            file_utils.write_file_safely(str(extracted_text_file), ocr_results['total_text'])
+            
+            # Generate structured notes if Groq is available
+            structured_notes = None
+            if groq_generator.is_available():
+                job_manager.update_job_progress(job_id, "Generating structured learning notes from scanned text...")
+                logger.info(f"Generating structured notes for page scan job {job_id}")
+                
+                # Use PDF notes generator as it's suitable for text-based content
+                structured_notes = await loop.run_in_executor(
+                    executor,
+                    groq_generator.generate_pdf_notes,
+                    ocr_results['total_text']
+                )
+                
+                if structured_notes:
+                    logger.info(f"Successfully generated structured notes for page scan job {job_id}")
+                    await self._save_notes_files(job_id, structured_notes)
+                    
+                    # Save to R2 storage if available
+                    if r2_storage.is_available():
+                        try:
+                            metadata = {
+                                "job_id": job_id,
+                                "user_id": user_id,
+                                "processing_date": datetime.now().isoformat(),
+                                "file_type": "page_scan_notes",
+                                "page_count": ocr_results['page_count'],
+                                "successful_pages": ocr_results['successful_pages'],
+                                "average_confidence": ocr_results['total_confidence'],
+                                "processing_time": time.time() - start_time
+                            }
+                            
+                            r2_key = r2_storage.save_notes(job_id, structured_notes, metadata, user_id)
+                            if r2_key:
+                                logger.info(f"✅ Page scan notes saved to R2 storage: {r2_key}")
+                            else:
+                                logger.warning("⚠️ Failed to save page scan notes to R2 storage")
+                        except Exception as e:
+                            logger.error(f"❌ R2 storage error: {e}")
+                else:
+                    logger.warning(f"Failed to generate structured notes for page scan job {job_id}")
+            
+            # Deduct credits only after successful processing and note generation
+            if user_id and self.db and structured_notes:
+                try:
+                    job_manager.update_job_progress(job_id, "Processing payment...")
+                    credit_result = await credit_service.check_and_deduct_credits(
+                        user_id=user_id,
+                        action=CreditAction.PDF_UPLOAD  # Use PDF_UPLOAD action for page scanning
+                    )
+                    
+                    if not credit_result.has_credits:
+                        logger.warning(f"⚠️ Credit deduction failed for page scan job {job_id}: {credit_result.message}")
+                    else:
+                        logger.info(f"✅ Credits deducted successfully for page scan job {job_id}: {credit_result.message}")
+                        
+                except Exception as credit_error:
+                    logger.error(f"❌ Credit deduction error for page scan job {job_id}: {credit_error}")
+                    # Don't fail the job due to credit issues
+            
+            # Set job as completed
+            result_data = {
+                "extracted_text": ocr_results['total_text'][:500] + "..." if len(ocr_results['total_text']) > 500 else ocr_results['total_text'],
+                "text_length": len(ocr_results['total_text']),
+                "page_count": ocr_results['page_count'],
+                "successful_pages": ocr_results['successful_pages'],
+                "failed_pages": len(ocr_results['failed_pages']),
+                "average_confidence": ocr_results['total_confidence'],
+                "word_count": ocr_results['total_word_count'],
+                "has_notes": structured_notes is not None,
+                "notes_preview": structured_notes[:200] + "..." if structured_notes and len(structured_notes) > 200 else structured_notes,
+                "processing_time": time.time() - start_time,
+                "credits_deducted": user_id and self.db and structured_notes,
+                "pages": ocr_results['pages']  # Include page-by-page results
+            }
+            job_manager.set_job_completed(job_id, result_data)
+            
+            # Update user statistics (non-blocking)
+            if user_id:
+                try:
+                    await self._increment_user_statistics(user_id, {
+                        'total_page_scans_processed': 1,
+                        'total_pages_scanned': ocr_results['successful_pages'],
+                        'total_notes_generated': 1 if structured_notes else 0
+                    })
+                except Exception as stats_error:
+                    logger.warning(f"Failed to update user statistics: {stats_error}")
+            
+            # Cleanup temporary files
+            if CLEANUP_TEMP_FILES:
+                for image_path in image_paths:
+                    file_utils.cleanup_temp_files(job_id, image_path)
+            
+        except Exception as e:
+            logger.error(f"Page scan processing failed for job {job_id}: {str(e)}")
+            job_manager.set_job_error(job_id, str(e))
+            if CLEANUP_TEMP_FILES:
+                for image_path in image_paths:
+                    file_utils.cleanup_temp_files(job_id, image_path)
     
     async def _save_transcription_file(self, job_id: str, transcription_result: Dict[str, Any]):
         """Save transcription to file"""
