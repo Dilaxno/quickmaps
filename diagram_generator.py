@@ -154,8 +154,11 @@ class DiagramGenerator:
             header = self._normalize_diagram_type(diagram_type)
             prompt = self._get_extraction_prompt(content, diagram_type, header)
 
+            # Select model per type: force Llama 3.1 8B Instant for all diagram types
+            model_to_use = 'llama-3.1-8b-instant'
+
             response = self.client.chat.completions.create(
-                model=self.model,
+                model=model_to_use,
                 messages=[
                     {
                         "role": "system",
@@ -335,7 +338,14 @@ class DiagramGenerator:
 
     def _get_extraction_prompt(self, content: str, diagram_type: str, header: str) -> str:
         """Get prompt for extracting structured logic based on normalized header and original type."""
-        base = f"""You are a diagram generation engine.\nINPUT: A set of notes that summarize a video or text.\n\nNotes:\n{content[:4000]}\n\nTASK:\n1. Read the notes carefully.\n2. Identify only the processes, sequences, relationships, and hierarchies explicitly mentioned in the notes.\n3. Generate a Mermaid {diagram_type} diagram.\n4. Start the diagram with EXACTLY: {header}\n5. Do NOT add any information that is not explicitly stated in the notes.\n6. Preserve all terminology exactly as it appears in the notes.\n7. Maintain logical accuracy: ensure all steps, nodes, and connections match the source text.\n\nOUTPUT FORMAT:\n- Respond only with a valid Mermaid diagram in the specified syntax.\n- Do not include any explanations, summaries, or commentary.\n- Do not wrap the diagram in extra text — output diagram code only.\n\nSTRICTNESS RULES:\n- If the notes are incomplete, leave gaps in the diagram rather than guessing.\n- Do not infer events, steps, or relationships that are not 100% supported by the notes.\n- The diagram must be directly mappable back to the exact wording in the notes.\n\n{self._get_diagram_specific_instructions(header)}\n\nGenerate the {diagram_type} now:"""
+        base = f"""You are a diagram generation engine.\nINPUT: A set of notes that summarize a video or text.\n\nNotes:\n{content[:4000]}\n\nTASK:\n1. Read the notes carefully.\n2. Identify only the processes, sequences, relationships, and hierarchies explicitly mentioned in the notes.\n3. Generate a Mermaid {diagram_type} diagram.\n4. Start the diagram with EXACTLY: {header}\n5. Do NOT add any information that is not explicitly stated in the notes.\n6. Preserve all terminology exactly as it appears in the notes.\n7. Maintain logical accuracy: ensure all steps, nodes, and connections match the source text.\n\nOUTPUT FORMAT:\n- Respond only with a valid Mermaid diagram in the specified syntax.\n- Do not include any explanations, summaries, or commentary.\n- Do not wrap the diagram in extra text — output diagram code only.\n\nSTRICTNESS RULES:\n- If the notes are incomplete, leave gaps in the diagram rather than guessing.\n- Do not infer events, steps, or relationships that are not 100% supported by the notes.\n- The diagram must be directly mappable back to the exact wording in the notes.\n\n{self._get_diagram_specific_instructions(header)}\n"""
+        # Generic style guidance for all types
+        style_guidance = f"\nSTYLE GUIDANCE:\n- Generate a professional {diagram_type} diagram from these notes.\n"
+        # Additional guidance for specific types
+        if header == 'sequenceDiagram':
+            style_guidance += "- Use clear participant names and concise message labels.\n"
+        base += style_guidance
+        base += f"\nGenerate the {diagram_type} now:"
         return base
 
     def _get_diagram_specific_instructions(self, header: str) -> str:
