@@ -12,7 +12,7 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from firebase_admin import firestore
-from brevo_service import brevo_service
+from resend_service import resend_service
 
 logger = logging.getLogger(__name__)
 
@@ -428,8 +428,8 @@ class CollaborationService:
             </div>
             """
             
-            # Send email using Brevo service
-            await brevo_service.send_email(
+            # Send email using Resend service
+            await resend_service.send_email(
                 to_email=email,
                 subject=subject,
                 html_content=html_content

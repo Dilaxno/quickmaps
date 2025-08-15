@@ -41,7 +41,6 @@ def main():
     print("\n📁 Backend Files:")
     backend_files = [
         ("collaboration_service.py", "Collaboration Service"),
-        ("brevo_service.py", "Email Service"),
         ("auth_service.py", "Authentication Service"),
         ("job_manager.py", "Job Manager"),
     ]
@@ -80,7 +79,6 @@ def main():
     # Check environment variables
     print("\n🔧 Environment Configuration:")
     env_vars = [
-        ("BREVO_API_KEY", "Brevo Email Service API Key"),
         ("FIREBASE_PROJECT_ID", "Firebase Project ID"),
     ]
     

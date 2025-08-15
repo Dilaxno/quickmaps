@@ -44,7 +44,7 @@ from payment_service import PaymentService, PaymentResult
 from affiliate_service import AffiliateService
 from notification_service import NotificationService
 from device_service import device_service
-from brevo_service import brevo_service
+from resend_service import resend_service
 from credit_service import credit_service
 from timestamp_mapper import timestamp_mapper
 from tts_service import tts_service
@@ -3363,11 +3363,11 @@ async def test_send_email(request: Request):
         
         logger.info(f"🧪 Testing email send to: {test_email}")
         
-        if not brevo_service.is_configured():
-            raise HTTPException(status_code=500, detail="Brevo service not configured")
+        if not resend_service.is_configured():
+            raise HTTPException(status_code=500, detail="Resend service not configured")
         
         # Test with password reset email template
-        success = brevo_service.send_password_reset_email(test_email, "test_token_123", "Test User")
+        success = resend_service.send_password_reset_email(test_email, "test_token_123", "Test User")
         
         if success:
             return {
@@ -3382,68 +3382,6 @@ async def test_send_email(request: Request):
         logger.error(f"❌ Error sending test email: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to send test email: {str(e)}")
 
-@app.post("/api/test/send-otp-email")
-async def test_send_otp_email(request: Request):
-    """Test OTP verification email sending"""
-    try:
-        body = await request.json()
-        test_email = body.get('email')
-        
-        if not test_email:
-            raise HTTPException(status_code=400, detail="Email is required")
-        
-        logger.info(f"🧪 Testing OTP email send to: {test_email}")
-        
-        if not brevo_service.is_configured():
-            raise HTTPException(status_code=500, detail="Brevo service not configured")
-        
-        # Test with OTP verification email template
-        success = brevo_service.send_otp_verification_email(test_email, "123456", "Test User", 10)
-        
-        if success:
-            return {
-                "status": "success",
-                "message": f"OTP verification email sent successfully to {test_email}",
-                "note": "Check your email inbox for the QuickMaps OTP verification email!"
-            }
-        else:
-            raise HTTPException(status_code=500, detail="Failed to send OTP email")
-                
-    except Exception as e:
-        logger.error(f"❌ Error testing OTP email: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to send test OTP email: {str(e)}")
-
-@app.get("/api/test/email-preview")
-async def preview_email_template():
-    """Preview the branded email template"""
-    try:
-        html_content = """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Email Preview</title>
-            <style>
-                body { font-family: Arial, sans-serif; padding: 20px; text-align: center; }
-                .info { background: #e7f3ff; padding: 20px; border-radius: 8px; margin: 20px 0; }
-            </style>
-        </head>
-        <body>
-            <h1>🔐 Email Preview</h1>
-            <div class="info">
-                <h3>Email preview is now handled by Brevo SMTP</h3>
-                <p>Password reset and welcome emails are sent via Brevo's email service.</p>
-                <p>To preview emails, you can test them by sending to a real email address using the test endpoints.</p>
-            </div>
-        </body>
-        </html>
-        """
-        
-        return Response(content=html_content, media_type="text/html")
-        
-    except Exception as e:
-        logger.error(f"❌ Error generating email preview: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to generate preview: {str(e)}")
-
 @app.post("/api/test/complete-password-reset")
 async def test_complete_password_reset(request: Request):
     """Test the complete password reset flow"""
@@ -3454,6 +3392,8 @@ async def test_complete_password_reset(request: Request):
         
         if not test_email:
             raise HTTPException(status_code=400, detail="Email is required")
+        
+        logger.info(f"🧪 Testing complete password reset flow for: {test_email}")
         
         # Step 1: Send password reset email
         logger.info(f"🧪 Testing complete password reset flow for: {test_email}")
@@ -3510,11 +3450,11 @@ async def test_send_welcome_email(request: Request):
         
         logger.info(f"🎉 Testing welcome email send to: {test_email}")
         
-        if not brevo_service.is_configured():
-            raise HTTPException(status_code=500, detail="Brevo service not configured")
+        if not resend_service.is_configured():
+            raise HTTPException(status_code=500, detail="Resend service not configured")
         
         # Send welcome email
-        success = brevo_service.send_welcome_email(test_email, user_name)
+        success = resend_service.send_welcome_email(test_email, user_name)
         
         if success:
             return {
@@ -3547,8 +3487,8 @@ async def preview_welcome_email_template():
         <body>
             <h1>🎉 Welcome Email Preview</h1>
             <div class="info">
-                <h3>Welcome emails are now handled by Brevo SMTP</h3>
-                <p>Professional welcome and onboarding emails are sent via Brevo's email service.</p>
+                <h3>Welcome emails are now handled by Resend SMTP</h3>
+                <p>Professional welcome and onboarding emails are sent via Resend's email service.</p>
                 <p>To preview emails, you can test them by sending to a real email address using the test endpoints.</p>
             </div>
         </body>
@@ -3600,14 +3540,14 @@ async def register_user(user_data: RegisterUserRequest, request: Request):
         
         # Send welcome email
         try:
-            if brevo_service.is_configured():
-                welcome_sent = brevo_service.send_welcome_email(email, name or email.split('@')[0])
+            if resend_service.is_configured():
+                welcome_sent = resend_service.send_welcome_email(email, name or email.split('@')[0])
                 if welcome_sent:
                     logger.info(f"✅ Welcome email sent to: {email}")
                 else:
                     logger.warning(f"⚠️ Failed to send welcome email to: {email}")
             else:
-                logger.warning("⚠️ Brevo service not configured, skipping welcome email")
+                logger.warning("⚠️ Resend service not configured, skipping welcome email")
         except Exception as e:
             logger.error(f"❌ Error sending welcome email: {e}")
             # Don't fail registration if email fails
@@ -3681,7 +3621,7 @@ async def register_user(user_data: RegisterUserRequest, request: Request):
                 "awarded": 10 if credits_initialized else 0,
                 "message": "🎉 You've received 10 free credits to get started!" if credits_initialized else "Credits will be awarded on first use"
             },
-            "welcome_email_sent": brevo_service.is_configured(),
+            "welcome_email_sent": resend_service.is_configured(),
             "note": "Welcome email sent! You've received 10 free credits to start creating amazing notes. Check your inbox to get started."
         }
                 
@@ -3806,11 +3746,11 @@ async def send_welcome_email_to_existing_user(request: Request):
         
         logger.info(f"📧 Sending welcome email to existing user: {email}")
         
-        if not brevo_service.is_configured():
-            raise HTTPException(status_code=500, detail="Brevo service not configured")
+        if not resend_service.is_configured():
+            raise HTTPException(status_code=500, detail="Resend service not configured")
         
         # Send welcome email
-        success = brevo_service.send_welcome_email(email, name)
+        success = resend_service.send_welcome_email(email, name)
         
         if success:
             return {

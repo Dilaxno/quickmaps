@@ -222,8 +222,8 @@ class CreditService:
             # Send welcome email if email is available
             if user_email and user_name:
                 try:
-                    from brevo_service import brevo_service
-                    welcome_sent = brevo_service.send_welcome_email(
+                    from resend_service import resend_service
+                    welcome_sent = resend_service.send_welcome_email(
                         user_email=user_email,
                         user_name=user_name,
                         welcome_credits=50

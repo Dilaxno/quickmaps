@@ -115,7 +115,6 @@ def get_user_friendly_error(error_type: str, context: str = "general") -> str:
         "INVALID_EMAIL": "Please enter a valid email address.",
         "EMAIL_NOT_VERIFIED": "Please verify your email address first.",
         "EMAIL_ALREADY_VERIFIED": "Your email address is already verified.",
-        "BREVO_API_ERROR": "Email service temporarily unavailable. Please try again later.",
         "SMTP_ERROR": "Email delivery failed. Please try again later.",
         "RATE_LIMIT_EXCEEDED": "Too many email requests. Please wait before trying again.",
     }

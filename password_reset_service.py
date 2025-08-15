@@ -91,18 +91,18 @@ class PasswordResetService:
             return False
     
     def send_password_reset_email(self, email: str, reset_token: str, user_name: str = "there") -> bool:
-        """Send password reset email via Brevo"""
+        """Send password reset email via Resend"""
         
-        # Import brevo_service locally to avoid circular imports
-        from brevo_service import brevo_service
+        # Import resend_service locally to avoid circular imports
+        from resend_service import resend_service
         
-        # Use Brevo as the email provider
-        if not brevo_service.is_configured():
-            logger.error("Brevo service is not configured. Please add BREVO_API_KEY and BREVO_SENDER_EMAIL to your environment variables.")
+        # Use Resend as the email provider
+        if not resend_service.is_configured():
+            logger.error("Resend service is not configured. Please add RESEND_API_KEY to your environment variables.")
             return False
-        
-        logger.info(f"Sending password reset email to {email} via Brevo...")
-        success = brevo_service.send_password_reset_email(email, reset_token, user_name)
+
+        logger.info(f"Sending password reset email to {email} via Resend...")
+        success = resend_service.send_password_reset_email(email, reset_token, user_name)
         
         if success:
             logger.info(f"Password reset email sent successfully to {email}")

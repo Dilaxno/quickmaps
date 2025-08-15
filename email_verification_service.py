@@ -31,20 +31,20 @@ class EmailVerificationService:
     def _now_utc(self) -> datetime:
         return datetime.utcnow()
 
-    def _send_via_brevo(self, email: str, code: str, name: str = 'there') -> bool:
+    def _send_via_resend(self, email: str, code: str, name: str = 'there') -> bool:
         # Import instance to reuse config and headers
-        from brevo_service import brevo_service
+        from resend_service import resend_service
         
         logger.info(f"🔧 Attempting to send OTP email to: {email}")
-        logger.info(f"🔧 Brevo service configured: {brevo_service.is_configured()}")
-        
-        if not brevo_service.is_configured():
-            logger.error('❌ Brevo service not configured; cannot send verification email')
-            return False
+        logger.info(f"🔧 Resend service configured: {resend_service.is_configured()}")
 
+        if not resend_service.is_configured():
+            logger.error('❌ Resend service not configured; cannot send verification email')
+            return False
+        
         try:
-            # Use the dedicated OTP email method from brevo_service
-            success = brevo_service.send_otp_verification_email(
+            # Use the dedicated OTP email method from resend_service
+            success = resend_service.send_otp_verification_email(
                 user_email=email,
                 otp_code=code,
                 user_name=name,
@@ -52,14 +52,14 @@ class EmailVerificationService:
             )
             
             if success:
-                logger.info(f"✅ Successfully sent OTP email to {email}")
+                logger.info(f"✅ OTP email sent to {email} via Resend")
                 return True
             else:
-                logger.error(f"❌ Failed to send OTP email to {email}")
+                logger.error(f"❌ Failed to send OTP email to {email} via Resend")
                 return False
                 
         except Exception as e:
-            logger.error(f"Error in _send_via_brevo: {e}")
+            logger.error(f"Error in _send_via_resend: {e}")
             import traceback
             logger.error(f"Full traceback: {traceback.format_exc()}")
             return False
@@ -97,7 +97,7 @@ class EmailVerificationService:
         }
         self._get_db().collection(self.collection).document(email_key).set(data)
 
-        sent = self._send_via_brevo(email_key, code, name or email.split('@')[0])
+        sent = self._send_via_resend(email_key, code, name or email.split('@')[0])
         if not sent:
             return {"success": False, "error": "EMAIL_FAILED", "message": "We couldn't send your verification email. Please check your email address and try again."}
         return {"success": True}
