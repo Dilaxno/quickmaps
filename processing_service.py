@@ -49,6 +49,25 @@ class ProcessingService:
             user_id (str, optional): User ID for credit tracking
         """
         try:
+            # Validate media duration based on user's plan (applies to all uploads)
+            if user_id and self.db:
+                job_manager.update_job_progress(job_id, "Validating media duration...")
+                user_plan = video_validation_service.get_user_plan_from_firestore(self.db, user_id)
+                validation_result = video_validation_service.validate_video_duration(
+                    video_path=video_path,
+                    user_plan=user_plan,
+                    user_id=user_id
+                )
+                if not validation_result.is_valid:
+                    # Suggest upgrade if applicable
+                    upgrade_suggestion = video_validation_service.get_plan_upgrade_suggestion(
+                        user_plan, validation_result.duration_minutes or 0
+                    )
+                    error_message = f"{validation_result.message}"
+                    if upgrade_suggestion:
+                        error_message += f" {upgrade_suggestion['message']}"
+                    raise Exception(error_message)
+
             job_manager.update_job_progress(job_id, "Extracting audio...")
             
             # Extract audio from video
