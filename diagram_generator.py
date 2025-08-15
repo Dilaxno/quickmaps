@@ -353,13 +353,13 @@ class DiagramGenerator:
         if header == 'flowchart':
             return """
 FLOWCHART SYNTAX REQUIREMENTS:
-- Start with "flowchart TD" or "graph TD".
+- Start with "flowchart LR" (Left to Right).
 - Use [ ] for processes, { } for decisions, (( )) for start/end.
 - Use --> for connections, -->|label| for labeled connections.
 - Keep node labels concise (<= 5 words).
 
 EXAMPLE:
-flowchart TD
+flowchart LR
     A[Start] --> B{Decision?}
     B -->|Yes| C[Action A]
     B -->|No| D[Action B]
@@ -369,7 +369,7 @@ flowchart TD
         if header == 'graph':
             return """
 GRAPH SYNTAX REQUIREMENTS:
-- Start with "graph TD" or "graph LR".
+- Start with "graph LR" (Left to Right).
 - Use [ ] for rectangular nodes.
 - Use --> for connections, -->|label| for labeled connections.
 
