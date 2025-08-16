@@ -15,6 +15,7 @@ import json
 import hmac
 import hashlib
 import httpx
+import re
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, File, UploadFile, Form, HTTPException, BackgroundTasks, Request, Response
@@ -1400,16 +1401,30 @@ async def _translate_with_groq(text: str, languages: list[str], include_glossary
     )
 
     try:
-        response = groq_generator.client.chat.completions.create(
-            model=model_id or os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'),
-            messages=[
-                {"role": "system", "content": "You translate accurately and output only valid JSON."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-            max_tokens=900,
-            top_p=0.9
-        )
+        try:
+            response = groq_generator.client.chat.completions.create(
+                model=model_id or os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'),
+                messages=[
+                    {"role": "system", "content": "You translate accurately and output only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                max_tokens=900,
+                top_p=0.9,
+                response_format={"type": "json_object"}
+            )
+        except Exception as e_rf:
+            logger.warning(f"Groq response_format not supported or failed, retrying without enforcement: {e_rf}")
+            response = groq_generator.client.chat.completions.create(
+                model=model_id or os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'),
+                messages=[
+                    {"role": "system", "content": "You translate accurately and output only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.2,
+                max_tokens=900,
+                top_p=0.9
+            )
         content = response.choices[0].message.content.strip()
         # Attempt to extract JSON if model added extra text
         start = content.find('{')
@@ -1418,7 +1433,20 @@ async def _translate_with_groq(text: str, languages: list[str], include_glossary
             content_json = content[start:end+1]
         else:
             content_json = content
-        parsed = json.loads(content_json)
+        try:
+            parsed = json.loads(content_json)
+        except Exception as je:
+            # Sanitize invalid unicode escapes like \uXXXX (malformed) and stray backslashes
+            s = content_json
+            # Replace any \u not followed by 4 hex digits with escaped backslash
+            s = re.sub(r"\\u(?![0-9a-fA-F]{4})", r"\\\\u", s)
+            # Escape lone backslashes that are not valid JSON escapes
+            s = re.sub(r"(?<!\\)\\(?![\\\"/bfnrtu])", r"\\\\", s)
+            try:
+                parsed = json.loads(s)
+            except Exception as je2:
+                logger.error(f"Lenient JSON parse failed for Groq translation: {je2}")
+                raise
         translations = parsed.get('translations')
         glossary = parsed.get('glossary', [])
 
