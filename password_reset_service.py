@@ -90,7 +90,7 @@ class PasswordResetService:
             logger.error(f"Error marking token as used: {e}")
             return False
     
-    def send_password_reset_email(self, email: str, reset_token: str, user_name: str = "there") -> bool:
+    async def send_password_reset_email(self, email: str, reset_token: str, user_name: str = "there") -> bool:
         """Send password reset email via Resend"""
         
         # Import resend_service locally to avoid circular imports
@@ -102,7 +102,8 @@ class PasswordResetService:
             return False
 
         logger.info(f"Sending password reset email to {email} via Resend...")
-        success = resend_service.send_password_reset_email(email, reset_token, user_name)
+        # Resend's method is async and expects (email, token)
+        success = await resend_service.send_password_reset_email(email, reset_token)
         
         if success:
             logger.info(f"Password reset email sent successfully to {email}")
@@ -118,7 +119,7 @@ class PasswordResetService:
             reset_token = await self.create_reset_token(email)
             
             # Send email with token
-            success = self.send_password_reset_email(email, reset_token, user_name)
+            success = await self.send_password_reset_email(email, reset_token, user_name)
             
             if success:
                 logger.info(f"Password reset process completed successfully for {email}")

@@ -56,7 +56,20 @@ class OCRService:
         if EASYOCR_AVAILABLE:
             try:
                 # Initialize with English; extend as needed
-                self.easy_reader = easyocr.Reader(['en'], gpu=False)
+                # Ensure model directory is writable to avoid init failures
+                model_dir_env = os.getenv('EASYOCR_MODEL_DIR', '')
+                default_model_dir = Path(__file__).parent / 'models' / 'easyocr'
+                model_dir = Path(model_dir_env) if model_dir_env else default_model_dir
+                try:
+                    model_dir.mkdir(parents=True, exist_ok=True)
+                except Exception as md_e:
+                    logger.warning(f"Failed to create EasyOCR model directory at {model_dir}: {md_e}")
+                self.easy_reader = easyocr.Reader(
+                    ['en'],
+                    gpu=False,
+                    download_enabled=True,
+                    model_storage_directory=str(model_dir)
+                )
                 self.use_tesseract = False
                 self.backend = 'easyocr'
                 logger.info("EasyOCR initialized successfully")

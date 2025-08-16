@@ -3928,7 +3928,7 @@ async def test_send_email(request: Request):
             raise HTTPException(status_code=500, detail="Resend service not configured")
         
         # Test with password reset email template
-        success = resend_service.send_password_reset_email(test_email, "test_token_123", "Test User")
+        success = await resend_service.send_password_reset_email(test_email, "test_token_123")
         
         if success:
             return {
