@@ -342,7 +342,7 @@ This is an automated message, please do not reply.
                         <div class="message">
                             <p>We're thrilled to have you join our community of learners and note-takers!</p>
                             <p>QuickMaps is designed to help you organize your thoughts, create beautiful notes, and boost your productivity with AI-powered features.</p>
-                            <p><strong>🎉 Great news!</strong> You've been awarded <strong>10 free credits</strong> to get started. Each credit lets you upload videos, PDFs, or create AI-powered content!</p>
+                            <p><strong>🎉 Great news!</strong> You're on the <strong>Free plan with 30 monthly credits</strong> to test the app. Each credit lets you upload videos, PDFs, or create AI-powered content!</p>
                         </div>
                         
                         <div class="button-container">
@@ -396,7 +396,7 @@ We're thrilled to have you join our community of learners and note-takers!
 
 QuickMaps is designed to help you organize your thoughts, create beautiful notes, and boost your productivity with AI-powered features.
 
-🎉 Great news! You've been awarded 10 FREE CREDITS to get started. Each credit lets you upload videos, PDFs, or create AI-powered content!
+🎉 Great news! You're on the Free plan with 30 MONTHLY CREDITS to test the app. Each credit lets you upload videos, PDFs, or create AI-powered content!
 
 🚀 WHAT YOU CAN DO WITH QUICKMAPS:
 ✨ Create and organize beautiful notes

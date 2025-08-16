@@ -78,8 +78,10 @@ class CreditService:
             
             user_data = user_doc.to_dict()
             
+            # Refresh monthly credits for free plan if needed
+            current_credits = await self._maybe_refresh_free_monthly_credits(user_ref, user_data)
+            
             # Handle backward compatibility - check for both 'credits' and 'current_credits' fields
-            current_credits = user_data.get('current_credits', 0)
             if current_credits == 0 and 'credits' in user_data:
                 # Use the 'credits' field if 'current_credits' is 0 or missing
                 current_credits = user_data.get('credits', 0)
@@ -136,9 +138,10 @@ class CreditService:
             
             user_data = user_doc.to_dict()
             
-            # Handle backward compatibility - check for both 'credits' and 'current_credits' fields
-            current_credits = user_data.get('current_credits', 0)
+            # Refresh monthly credits for free plan if needed
+            current_credits = await self._maybe_refresh_free_monthly_credits(user_ref, user_data)
             using_legacy_field = False
+            # Handle backward compatibility - check for both 'credits' and 'current_credits' fields
             if current_credits == 0 and 'credits' in user_data:
                 # Use the 'credits' field if 'current_credits' is 0 or missing
                 current_credits = user_data.get('credits', 0)
@@ -202,7 +205,7 @@ class CreditService:
             user_data = {
                 'user_id': user_id,
                 'plan': 'free',
-                'current_credits': 50,  # Free trial credits (5 generations at 10 credits each)
+                'current_credits': 30,  # Free monthly credits
                 'credits_used': 0,
                 'total_mindmaps': 0,
                 'created_at': datetime.now(),
@@ -217,17 +220,13 @@ class CreditService:
                 user_data['name'] = user_name
             
             user_ref.set(user_data)
-            logger.info(f"🆕 Initialized new user {user_id} with 50 free credits")
+            logger.info(f"🆕 Initialized new user {user_id} with 30 free credits")
             
             # Send welcome email if email is available
             if user_email and user_name:
                 try:
                     from resend_service import resend_service
-                    welcome_sent = resend_service.send_welcome_email(
-                        user_email=user_email,
-                        user_name=user_name,
-                        welcome_credits=50
-                    )
+                    welcome_sent = await resend_service.send_welcome_email(user_email, user_name)
                     if welcome_sent:
                         logger.info(f"📧 Welcome email sent to new user {user_email}")
                     else:
@@ -254,6 +253,37 @@ class CreditService:
         except Exception as e:
             logger.error(f"❌ Error logging credit usage: {e}")
     
+    async def _maybe_refresh_free_monthly_credits(self, user_ref, user_data) -> int:
+        """Refresh monthly credits for free plan users if 30 days have passed. Returns current credits after refresh."""
+        try:
+            plan = str(user_data.get('plan', user_data.get('currentPlan', 'free'))).lower()
+            if plan != 'free':
+                # Only refresh for free plan
+                return user_data.get('current_credits', user_data.get('credits', 0))
+            last_update = user_data.get('lastCreditUpdate') or user_data.get('last_credit_update') or user_data.get('created_at')
+            now = datetime.now()
+            last_dt = None
+            if isinstance(last_update, datetime):
+                last_dt = last_update
+            else:
+                try:
+                    if last_update:
+                        last_dt = datetime.fromisoformat(str(last_update))
+                except Exception:
+                    last_dt = None
+            if last_dt is None:
+                # Force refresh if we can't determine last update
+                last_dt = now - timedelta(days=31)
+            if (now - last_dt) >= timedelta(days=30):
+                new_credits = 30
+                user_ref.update({'current_credits': new_credits, 'lastCreditUpdate': now})
+                logger.info(f"♻️ Refreshed monthly free credits to {new_credits} for user {user_ref.id}")
+                return new_credits
+            return user_data.get('current_credits', user_data.get('credits', 0))
+        except Exception as e:
+            logger.warning(f"⚠️ Failed to refresh monthly credits: {e}")
+            return user_data.get('current_credits', user_data.get('credits', 0))
+
     async def get_user_credits(self, user_id: str, user_email: str = None, user_name: str = None) -> Dict:
         """Get user's current credit information"""
         if not user_id or not self.db:
@@ -269,8 +299,10 @@ class CreditService:
             
             user_data = user_doc.to_dict()
             
+            # Refresh monthly credits for free plan if needed
+            current_credits = await self._maybe_refresh_free_monthly_credits(user_ref, user_data)
+            
             # Handle backward compatibility - check for both 'credits' and 'current_credits' fields
-            current_credits = user_data.get('current_credits', 0)
             if current_credits == 0 and 'credits' in user_data:
                 # Use the 'credits' field if 'current_credits' is 0 or missing
                 current_credits = user_data.get('credits', 0)

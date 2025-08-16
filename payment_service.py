@@ -68,8 +68,8 @@ class PaymentService:
             PlanType.FREE.value: PlanConfig(
                 plan_id="free",
                 name="Free",
-                monthly_credits=10,
-                yearly_credits=10,
+                monthly_credits=30,
+                yearly_credits=30,
                 monthly_price=0.0,
                 yearly_price=0.0,
                 features=["Up to 10 mind maps per month", "Basic mind map generation", "JSON and PDF exports", "Community support"]
