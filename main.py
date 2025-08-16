@@ -1317,6 +1317,170 @@ async def examples_phrase_endpoint(req: ExplainRequest):
         logger.error(f"Unexpected error in examples-phrase: {e}")
         raise HTTPException(status_code=500, detail="Failed to generate examples")
 
+# Translation endpoints (supports UI fallbacks: JSON POST, GET with query, form-encoded; multiple route names)
+from fastapi import Body
+
+async def _parse_translate_params(request: Request) -> dict:
+    """Parse translate parameters from JSON, form or query with flexible aliases."""
+    data = {}
+    form = None
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    try:
+        form = await request.form()
+    except Exception:
+        form = None
+    query = dict(request.query_params or {})
+
+    def pick(*keys, default=None):
+        for k in keys:
+            if k in data and data[k] not in (None, ""):
+                return data[k]
+            if form is not None and k in form and form[k] not in (None, ""):
+                return form.get(k)
+            if k in query and query[k] not in (None, ""):
+                return query.get(k)
+        return default
+
+    text = pick('text', 'phrase', default="")
+    raw_langs = pick('target_languages', 'languages', 'to', default=None)
+    include_glossary_raw = pick('include_glossary', 'glossary', 'return_glossary', default=False)
+    model_id = pick('model_id', 'model', default=os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'))
+
+    # Normalize languages
+    languages: list[str] = []
+    if isinstance(raw_langs, (list, tuple)):
+        languages = [str(x).strip() for x in raw_langs if str(x).strip()]
+    elif isinstance(raw_langs, str) and raw_langs.strip():
+        languages = [s.strip() for s in raw_langs.split(',') if s.strip()]
+
+    # Default to at least one language if none provided
+    if not languages:
+        languages = ['es']
+
+    # Normalize boolean for include_glossary
+    if isinstance(include_glossary_raw, str):
+        include_glossary = include_glossary_raw.strip().lower() in ("1", "true", "yes", "y", "on")
+    else:
+        include_glossary = bool(include_glossary_raw)
+
+    return {
+        'text': str(text or "").strip(),
+        'languages': languages,
+        'include_glossary': include_glossary,
+        'model_id': model_id,
+    }
+
+async def _translate_with_groq(text: str, languages: list[str], include_glossary: bool, model_id: str) -> dict:
+    """Use Groq LLM to produce translations and optional glossary in a single JSON response."""
+    if not groq_generator.is_available():
+        # Graceful fallback: echo text for each language, empty glossary
+        return {
+            'success': True,
+            'translations': [{ 'lang': lang, 'text': text } for lang in languages],
+            'glossary': []
+        }
+
+    prompt = (
+        "You are a precise multilingual translator. Translate the input text into the specified language codes. "
+        "Return strictly valid JSON with no extra commentary. If include_glossary is true, also add a small glossary of 3-7 key terms.\n\n"
+        f"Input text: {json.dumps(text)}\n"
+        f"Target language codes: {json.dumps(languages)}\n"
+        f"Include glossary: {json.dumps(include_glossary)}\n\n"
+        "JSON schema:\n"
+        "{\n"
+        "  \"translations\": [ { \"lang\": <code>, \"text\": <translated text> }, ... ],\n"
+        "  \"glossary\": [ { \"term\": <term>, \"definition\": <short definition>, \"targetLang\": <code optional> }, ... ]\n"
+        "}\n"
+        "Do not wrap in markdown."
+    )
+
+    try:
+        response = groq_generator.client.chat.completions.create(
+            model=model_id or os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'),
+            messages=[
+                {"role": "system", "content": "You translate accurately and output only valid JSON."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=900,
+            top_p=0.9
+        )
+        content = response.choices[0].message.content.strip()
+        # Attempt to extract JSON if model added extra text
+        start = content.find('{')
+        end = content.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            content_json = content[start:end+1]
+        else:
+            content_json = content
+        parsed = json.loads(content_json)
+        translations = parsed.get('translations')
+        glossary = parsed.get('glossary', [])
+
+        # Normalize translations to array
+        if isinstance(translations, dict):
+            # e.g., {"es": "hola", "fr": "bonjour"}
+            translations = [{ 'lang': k, 'text': v } for k, v in translations.items()]
+        elif isinstance(translations, list):
+            # ensure shape
+            norm = []
+            for t in translations:
+                if isinstance(t, dict) and 'lang' in t and 'text' in t:
+                    norm.append({ 'lang': t['lang'], 'text': t['text'] })
+            translations = norm
+        else:
+            # Fallback: build from languages if single string returned
+            if isinstance(parsed, str):
+                translations = [{ 'lang': languages[0], 'text': parsed }]
+            else:
+                translations = [{ 'lang': lang, 'text': text } for lang in languages]
+
+        # Normalize glossary
+        if not isinstance(glossary, list):
+            glossary = []
+
+        return { 'success': True, 'translations': translations, 'glossary': glossary }
+    except Exception as e:
+        logger.error(f"Translate error via Groq: {e}")
+        # Soft fallback
+        return {
+            'success': True,
+            'translations': [{ 'lang': lang, 'text': text } for lang in languages],
+            'glossary': []
+        }
+
+async def _handle_translate(request: Request):
+    params = await _parse_translate_params(request)
+    text = params['text']
+    languages = params['languages']
+    include_glossary = params['include_glossary']
+    model_id = params['model_id']
+
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    result = await _translate_with_groq(text, languages, include_glossary, model_id)
+    return JSONResponse(status_code=200, content=result)
+
+# Primary endpoint (preferred by UI)
+@app.api_route("/api/translate", methods=["GET", "POST"])
+async def translate_endpoint(request: Request):
+    return await _handle_translate(request)
+
+# Alternate names the UI may try
+@app.api_route("/api/translate-glossary", methods=["GET", "POST"])
+async def translate_glossary_endpoint(request: Request):
+    return await _handle_translate(request)
+
+@app.api_route("/api/translate_with_glossary", methods=["GET", "POST"])
+async def translate_with_glossary_endpoint(request: Request):
+    return await _handle_translate(request)
+
 # Quiz generation endpoints
 @app.post("/api/generate-quiz/{job_id}")
 async def generate_quiz_for_job(
