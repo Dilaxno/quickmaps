@@ -1509,6 +1509,129 @@ async def translate_glossary_endpoint(request: Request):
 async def translate_with_glossary_endpoint(request: Request):
     return await _handle_translate(request)
 
+# ELI5 endpoints (supports JSON POST, GET with query, and form-encoded POST; multiple route names)
+async def _parse_eli5_params(request: Request) -> dict:
+    """Parse ELI5 parameters from JSON, form or query with flexible aliases."""
+    data = {}
+    form = None
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    try:
+        form = await request.form()
+    except Exception:
+        form = None
+    query = dict(request.query_params or {})
+
+    def pick(*keys, default=None):
+        for k in keys:
+            if k in data and data[k] not in (None, ""):
+                return data[k]
+            if form is not None and k in form and form[k] not in (None, ""):
+                return form.get(k)
+            if k in query and query[k] not in (None, ""):
+                return query.get(k)
+        return default
+
+    phrase = pick('phrase', 'text', default="")
+    model_id = pick('model_id', 'model', default=os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'))
+
+    return {
+        'phrase': str(phrase or "").strip(),
+        'model_id': model_id,
+    }
+
+async def _eli5_with_groq(phrase: str, model_id: str) -> dict:
+    """Use Groq LLM to produce beginner and intermediate explanations as JSON."""
+    if not groq_generator.is_available():
+        raise HTTPException(status_code=503, detail="ELI5 service is not available. Please check AI configuration.")
+
+    # Build JSON-enforced prompt
+    prompt = (
+        "You are a teacher. Explain the input concept at two levels and return strictly valid JSON only.\n\n"
+        f"Concept: {json.dumps(phrase)}\n\n"
+        "JSON schema:\n"
+        "{\n"
+        "  \"beginner\": <2-4 short, simple sentences>,\n"
+        "  \"intermediate\": <3-6 concise, more detailed sentences>\n"
+        "}\n"
+        "No commentary or markdown, JSON only."
+    )
+
+    try:
+        try:
+            response = groq_generator.client.chat.completions.create(
+                model=model_id or os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'),
+                messages=[
+                    {"role": "system", "content": "You explain concepts at beginner and intermediate levels and output only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.25,
+                max_tokens=700,
+                top_p=0.9,
+                response_format={"type": "json_object"}
+            )
+        except Exception as e_rf:
+            logger.warning(f"Groq response_format not supported for ELI5 or failed, retrying without enforcement: {e_rf}")
+            response = groq_generator.client.chat.completions.create(
+                model=model_id or os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'),
+                messages=[
+                    {"role": "system", "content": "You explain concepts at beginner and intermediate levels and output only valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.25,
+                max_tokens=700,
+                top_p=0.9
+            )
+        content = response.choices[0].message.content.strip()
+        # Attempt to extract/parse JSON
+        start = content.find('{')
+        end = content.rfind('}')
+        if start != -1 and end != -1 and end > start:
+            content_json = content[start:end+1]
+        else:
+            content_json = content
+        try:
+            parsed = json.loads(content_json)
+        except Exception as je:
+            s = content_json
+            s = re.sub(r"\\u(?![0-9a-fA-F]{4})", r"\\\\u", s)
+            s = re.sub(r"(?<!\\)\\(?![\\\"/bfnrtu])", r"\\\\", s)
+            parsed = json.loads(s)
+        beginner = str(parsed.get('beginner', '')).strip()
+        intermediate = str(parsed.get('intermediate', '')).strip()
+        return { 'success': True, 'beginner': beginner, 'intermediate': intermediate }
+    except Exception as e:
+        logger.error(f"ELI5 error via Groq: {e}")
+        raise HTTPException(status_code=502, detail="Failed to generate ELI5 explanation. Please try again.")
+
+async def _handle_eli5(request: Request):
+    params = await _parse_eli5_params(request)
+    phrase = params['phrase']
+    model_id = params['model_id']
+
+    if not phrase:
+        raise HTTPException(status_code=400, detail="Phrase is required")
+
+    if len(phrase) > 500:
+        phrase = phrase[:500]
+
+    result = await _eli5_with_groq(phrase, model_id)
+    return JSONResponse(status_code=200, content=result)
+
+# Primary endpoint (preferred by UI)
+@app.api_route("/api/explain-eli5", methods=["GET", "POST"])
+async def explain_eli5_endpoint(request: Request):
+    return await _handle_eli5(request)
+
+# Alternate name the UI may try
+@app.api_route("/api/eli5", methods=["GET", "POST"])
+async def eli5_alias_endpoint(request: Request):
+    return await _handle_eli5(request)
+
 # Quiz generation endpoints
 @app.post("/api/generate-quiz/{job_id}")
 async def generate_quiz_for_job(
