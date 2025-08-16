@@ -110,9 +110,21 @@ class DiagramGenerator:
 
             normalized_header = self._normalize_diagram_type(diagram_type)
 
+            # Also produce React Flow-friendly nodes/edges when possible
+            nodes: list[dict] = []
+            edges: list[dict] = []
+            try:
+                header = self._normalize_diagram_type(diagram_type)
+                n, e = self._mermaid_to_graph(header, mermaid_syntax)
+                nodes, edges = n or [], e or []
+            except Exception as conv_err:
+                logger.info(f"Graph conversion not available: {conv_err}")
+
             diagram_data = {
                 "type": diagram_type,  # keep original requested type for UI
                 "mermaid_syntax": mermaid_syntax,
+                "nodes": nodes,
+                "edges": edges,
                 "structured_data": None,
                 "title": self._extract_title_from_notes(notes),
                 "description": f"Auto-generated {diagram_type} diagram from learning notes",
@@ -263,6 +275,99 @@ class DiagramGenerator:
                 cleaned_lines.append('    ' + line.strip())
 
         return '\n'.join(cleaned_lines)
+
+    def _mermaid_to_graph(self, header: str, code: str) -> tuple[list[dict], list[dict]]:
+        """Convert Mermaid code to a React Flow friendly nodes/edges pair for common types.
+        Supports: mindmap (indent-based), flowchart/graph (edge list)."""
+        try:
+            nodes: list[dict] = []
+            edges: list[dict] = []
+            h = (header or '').strip()
+            if not code or not code.strip():
+                return nodes, edges
+
+            lines = [ln.rstrip('\n') for ln in str(code).split('\n')]
+
+            if h == 'mindmap':
+                # Indentation-based parsing
+                stack: list[tuple[str, int]] = []  # (id, level)
+                next_id = 0
+
+                def add_node(label: str, level: int) -> str:
+                    nonlocal next_id
+                    nid = 'c' if level == 0 and not nodes else f'n{next_id}'
+                    if level > 0 or nodes:  # increment for non-root
+                        next_id += 1
+                    nodes.append({ 'id': nid, 'label': label.strip() or nid })
+                    return nid
+
+                def clean_label(raw: str) -> str:
+                    s = raw.strip()
+                    s = s.replace('root((', '').replace('))', '')
+                    # remove mermaid brackets from labels
+                    import re as _re
+                    s = _re.sub(r"[\[\]\{\}]", '', s)
+                    s = _re.sub(r"\(\(|\)\)", '', s)
+                    return s.strip()
+
+                for raw in lines:
+                    if not raw.strip():
+                        continue
+                    if raw.strip().lower().startswith('mindmap'):
+                        continue
+                    indent = len(raw) - len(raw.lstrip(' '))
+                    level = max(0, indent // 2)
+                    label = clean_label(raw.strip())
+                    if not label:
+                        continue
+
+                    while stack and stack[-1][1] >= level:
+                        stack.pop()
+                    nid = add_node(label, level)
+                    if stack:
+                        edges.append({ 'id': f"e-{stack[-1][0]}-{nid}", 'source': stack[-1][0], 'target': nid })
+                    stack.append((nid, level))
+
+                return nodes, edges
+
+            if h in ('flowchart', 'graph'):
+                # Basic parser for node defs and edges
+                import re
+                id_to_label: dict[str,str] = {}
+                for raw in lines:
+                    text = raw.strip()
+                    if not text or text.lower().startswith(('flowchart', 'graph')):
+                        continue
+                    # Node definitions
+                    m = re.match(r"^(?P<id>[A-Za-z0-9_-]+)\s*(\[(?P<sq>[^\]]+)\]|\(\((?P<dbl>[^\)]+)\)\)|\((?P<par>[^\)]+)\)|\{(?P<br>[^}]+)\})", text)
+                    if m:
+                        nid = m.group('id')
+                        label = m.group('sq') or m.group('dbl') or m.group('par') or m.group('br') or nid
+                        id_to_label[nid] = label
+                        continue
+                # Second pass for edges
+                for raw in lines:
+                    text = raw.strip()
+                    if not text or text.lower().startswith(('flowchart', 'graph')):
+                        continue
+                    m = re.match(r"^(?P<src>[A-Za-z0-9_-]+)\s*[-.=]+>.*?(?P<dst>[A-Za-z0-9_-]+)\b", text)
+                    if m:
+                        s = m.group('src'); t = m.group('dst')
+                        edges.append({ 'id': f"e-{s}-{t}", 'source': s, 'target': t })
+                        if s not in id_to_label:
+                            id_to_label[s] = s
+                        if t not in id_to_label:
+                            id_to_label[t] = t
+                # Build nodes list with simple layout hints deferred to frontend
+                for nid, label in id_to_label.items():
+                    nodes.append({ 'id': nid, 'label': label })
+                return nodes, edges
+
+            # Other types: return empty to let frontend lay out defaults
+            return nodes, edges
+        except Exception as e:
+            logger.warning(f"Failed to convert Mermaid to graph: {e}")
+            return [], []
 
     def _validate_diagram_syntax(self, syntax: str, diagram_type: str) -> bool:
         """Validate diagram syntax for basic correctness and correct header"""
