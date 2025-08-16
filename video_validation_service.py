@@ -93,24 +93,48 @@ class VideoValidationService:
         try:
             if not db or not user_id:
                 return PlanType.FREE.value
-            
+
             user_ref = db.collection('users').document(user_id)
             user_doc = user_ref.get()
-            
+
             if not user_doc.exists:
                 logger.warning(f"User {user_id} not found in database")
                 return PlanType.FREE.value
-            
-            user_data = user_doc.to_dict()
-            plan_id = user_data.get('planId', PlanType.FREE.value)
-            subscription_status = user_data.get('subscriptionStatus', 'free')
-            
-            # If subscription is not active, default to free plan
-            if subscription_status not in ['active']:
+
+            user_data = user_doc.to_dict() or {}
+
+            # Read plan from multiple possible fields used across apps
+            plan_id = (
+                user_data.get('plan') or
+                user_data.get('currentPlan') or
+                user_data.get('planId') or
+                PlanType.FREE.value
+            )
+
+            # Normalize and validate plan id
+            if isinstance(plan_id, str):
+                plan_id = plan_id.lower()
+            if plan_id not in self.duration_limits:
+                logger.warning(f"Unknown plan_id '{plan_id}' for user {user_id}; defaulting to free")
                 plan_id = PlanType.FREE.value
-            
+
+            # Determine subscription status (support multiple field names)
+            subscription_status = (
+                user_data.get('subscription_status') or
+                user_data.get('subscriptionStatus') or
+                'active'
+            )
+            if isinstance(subscription_status, str):
+                subscription_status = subscription_status.lower()
+
+            # Treat typical active statuses as valid
+            active_statuses = {'active', 'trialing', 'paid', 'past_due'}
+            if subscription_status not in active_statuses:
+                logger.info(f"Subscription status '{subscription_status}' not active for user {user_id}; defaulting plan to free")
+                plan_id = PlanType.FREE.value
+
             return plan_id
-            
+
         except Exception as e:
             logger.error(f"Error fetching user plan: {e}")
             return PlanType.FREE.value

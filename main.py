@@ -104,6 +104,9 @@ class SemanticSearchRequest(BaseModel):
     query: str
     limit: Optional[int] = 20
 
+class ExplainRequest(BaseModel):
+    phrase: str
+
 app = FastAPI(title="Quickmaps Backend", version="1.1.0")
 
 # Add validation exception handler
@@ -1174,6 +1177,145 @@ async def generate_tts_for_job(
     except Exception as e:
         logger.error(f"❌ TTS generation failed for job {job_id}: {e}")
         raise
+
+# Explain phrase endpoint (Groq - Llama 3.1 8B Instant)
+@app.post("/api/explain-phrase")
+async def explain_phrase_endpoint(req: ExplainRequest):
+    try:
+        if not groq_generator.is_available():
+            raise HTTPException(status_code=503, detail="Explanation service is not available. Please check AI configuration.")
+        
+        phrase = (req.phrase or "").strip()
+        if not phrase:
+            raise HTTPException(status_code=400, detail="Phrase is required")
+        
+        # Limit phrase length to reasonable amount to prevent abuse
+        if len(phrase) > 500:
+            phrase = phrase[:500]
+        
+        # Custom prompt as requested
+        prompt = f"Can you generate more detailed explanation about this phrase: ({phrase})"
+        
+        try:
+            response = groq_generator.client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": "You are a helpful educational assistant that explains concepts clearly and concisely."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=600,
+                top_p=0.9
+            )
+            explanation = response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Groq API error (explain-phrase): {e}")
+            raise HTTPException(status_code=502, detail="Failed to generate explanation. Please try again.")
+        
+        return {"success": True, "explanation": explanation}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in explain-phrase: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate explanation")
+
+# Define phrase endpoint (Groq - Llama 3.1 8B Instant)
+@app.post("/api/define-phrase")
+async def define_phrase_endpoint(req: ExplainRequest):
+    try:
+        if not groq_generator.is_available():
+            raise HTTPException(status_code=503, detail="Definition service is not available. Please check AI configuration.")
+
+        phrase = (req.phrase or "").strip()
+        if not phrase:
+            raise HTTPException(status_code=400, detail="Phrase is required")
+
+        # Limit length to prevent abuse
+        if len(phrase) > 500:
+            phrase = phrase[:500]
+
+        # Structured, compact definition prompt
+        prompt = (
+            f"You are an expert educator. Provide a concise, plain-language definition for the term "
+            f"\"{phrase}\". Then list synonyms and common confusions in a compact format.\n\n"
+            f"Output format (no preface):\n"
+            f"Definition: <2-3 sentences, simple language>\n"
+            f"Synonyms: <up to 5 synonyms, comma-separated>\n"
+            f"Common confusions:\n"
+            f"- <Term 1>: <one-line distinction>\n"
+            f"- <Term 2>: <one-line distinction>\n"
+            f"(Include 1-3 items if relevant)"
+        )
+
+        try:
+            response = groq_generator.client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": "You explain concepts clearly, briefly, and accurately for students."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=600,
+                top_p=0.9
+            )
+            definition = response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Groq API error (define-phrase): {e}")
+            raise HTTPException(status_code=502, detail="Failed to generate definition. Please try again.")
+
+        return {"success": True, "definition": definition}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in define-phrase: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate definition")
+
+# Examples for phrase endpoint (Groq - Llama 3.1 8B Instant)
+@app.post("/api/examples-phrase")
+async def examples_phrase_endpoint(req: ExplainRequest):
+    try:
+        if not groq_generator.is_available():
+            raise HTTPException(status_code=503, detail="Examples service is not available. Please check AI configuration.")
+
+        phrase = (req.phrase or "").strip()
+        if not phrase:
+            raise HTTPException(status_code=400, detail="Phrase is required")
+
+        if len(phrase) > 500:
+            phrase = phrase[:500]
+
+        prompt = (
+            f"Provide 1–3 concrete, domain-relevant examples for the term \"{phrase}\".\n"
+            f"Make each example concise and specific.\n\n"
+            f"Output format (no preface):\n"
+            f"1) <Short label/title> — <1–2 sentence example>\n"
+            f"2) <Short label/title> — <1–2 sentence example>\n"
+            f"3) <Short label/title> — <1–2 sentence example>\n"
+            f"(Include 1–3 items depending on relevance)"
+        )
+
+        try:
+            response = groq_generator.client.chat.completions.create(
+                model=GROQ_MODEL,
+                messages=[
+                    {"role": "system", "content": "You produce clear, concise, and relevant examples for learners."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.35,
+                max_tokens=600,
+                top_p=0.9
+            )
+            examples = response.choices[0].message.content.strip()
+        except Exception as e:
+            logger.error(f"Groq API error (examples-phrase): {e}")
+            raise HTTPException(status_code=502, detail="Failed to generate examples. Please try again.")
+
+        return {"success": True, "examples": examples}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error in examples-phrase: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate examples")
 
 # Quiz generation endpoints
 @app.post("/api/generate-quiz/{job_id}")
