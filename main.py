@@ -1632,6 +1632,110 @@ async def explain_eli5_endpoint(request: Request):
 async def eli5_alias_endpoint(request: Request):
     return await _handle_eli5(request)
 
+# Mind map generation endpoints (supports JSON POST, GET with query, and form-encoded POST; multiple route names)
+async def _parse_mindmap_params(request: Request) -> dict:
+    """Parse Mind Map parameters from JSON, form or query with flexible aliases."""
+    data = {}
+    form = None
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    try:
+        form = await request.form()
+    except Exception:
+        form = None
+    query = dict(request.query_params or {})
+
+    def pick(*keys, default=None):
+        for k in keys:
+            if k in data and data[k] not in (None, ""):
+                return data[k]
+            if form is not None and k in form and form[k] not in (None, ""):
+                return form.get(k)
+            if k in query and query[k] not in (None, ""):
+                return query.get(k)
+        return default
+
+    text = pick('text', 'phrase', 'content', default="")
+    diagram_type = pick('diagram_type', 'type', default='mindmap')
+    model_id = pick('model_id', 'model', default=os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'))
+
+    return {
+        'text': str(text or "").strip(),
+        'diagram_type': (diagram_type or 'mindmap').strip(),
+        'model_id': model_id,
+    }
+
+async def _mindmap_with_groq(text: str, diagram_type: str, model_id: str) -> dict:
+    """Use Groq LLM via DiagramGenerator to produce a Mermaid mind map diagram."""
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    # Prefer dedicated diagram generator which already uses llama-3.1-8b-instant
+    if diagram_generator.is_available():
+        if diagram_type.lower() == 'mindmap':
+            diagram = diagram_generator.generate_mindmap_diagram(text)
+        else:
+            diagram = diagram_generator.generate_diagram_from_notes(text, diagram_type)
+        if diagram:
+            return { 'success': True, 'diagram': diagram }
+        # Fall through to naive fallback if generation failed
+
+    # Fallback: build a trivial mindmap Mermaid from keywords
+    try:
+        center = (text.split('\n', 1)[0] or 'Topic').strip()[:60]
+        # simple keyword extraction
+        import re
+        words = re.findall(r"[A-Za-z]{4,}", text.lower())
+        stop = set(['the','and','for','with','that','this','from','into','over','under','also','than','then','they','them','your','are','was','were','have','has','used','using','use','you','will','shall','should','could','would','can','may','might','not','but','because','therefore','however','moreover','furthermore','about'])
+        freq = {}
+        for w in words:
+            if w in stop: continue
+            freq[w] = freq.get(w, 0) + 1
+        keywords = [w for w,_ in sorted(freq.items(), key=lambda kv: kv[1], reverse=True)[:8]] or ['idea','concept','detail']
+        lines = ["mindmap", f"  root((" + center.replace('(', '').replace(')', '') + "))"]
+        for kw in keywords:
+            lines.append(f"    {kw[:24]}")
+        mermaid = "\n".join(lines)
+        return {
+            'success': True,
+            'diagram': {
+                'type': 'mindmap',
+                'mermaid_syntax': mermaid,
+                'title': center,
+                'description': 'Auto-generated mind map from selection',
+            }
+        }
+    except Exception as e:
+        logger.error(f"Mindmap fallback generation failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate mind map")
+
+async def _handle_mindmap(request: Request):
+    params = await _parse_mindmap_params(request)
+    text = params['text']
+    diagram_type = params['diagram_type'] or 'mindmap'
+    model_id = params['model_id']
+
+    # Clamp length to reasonable bounds
+    if len(text) > 5000:
+        text = text[:5000]
+
+    result = await _mindmap_with_groq(text, diagram_type, model_id)
+    return JSONResponse(status_code=200, content=result)
+
+# Primary mindmap endpoint
+@app.api_route("/api/mindmap", methods=["GET", "POST"])
+async def mindmap_endpoint(request: Request):
+    return await _handle_mindmap(request)
+
+# Alternate name the UI may try
+@app.api_route("/api/generate-mindmap", methods=["GET", "POST"])
+async def generate_mindmap_endpoint(request: Request):
+    return await _handle_mindmap(request)
+
 # Quiz generation endpoints
 @app.post("/api/generate-quiz/{job_id}")
 async def generate_quiz_for_job(
