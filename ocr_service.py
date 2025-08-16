@@ -17,7 +17,15 @@ import json
 from PIL import Image, ImageEnhance, ImageFilter
 import tempfile
 
-# Try PaddleOCR first
+# Try EasyOCR (preferred)
+try:
+    import easyocr  # type: ignore
+    EASYOCR_AVAILABLE = True
+except Exception:
+    EASYOCR_AVAILABLE = False
+    logging.warning("EasyOCR not available. Falling back to other OCR engines if present.")
+
+# Try PaddleOCR
 try:
     from paddleocr import PaddleOCR  # type: ignore
     PADDLEOCR_AVAILABLE = True
@@ -31,24 +39,38 @@ try:
     TESSERACT_AVAILABLE = True
 except Exception:
     TESSERACT_AVAILABLE = False
-    logging.warning("pytesseract not available. If PaddleOCR is missing, OCR will be unavailable.")
+    logging.warning("pytesseract not available. If EasyOCR/PaddleOCR are missing, OCR will be unavailable.")
 
 # Setup logging
 logger = logging.getLogger(__name__)
 
 
 class OCRService:
-    """Service for handling OCR operations using PaddleOCR with Tesseract fallback"""
+    """Service for handling OCR operations using EasyOCR (preferred), PaddleOCR, with Tesseract fallback"""
 
     def __init__(self):
+        self.easy_reader = None  # EasyOCR reader instance
         self.ocr_engine = None  # PaddleOCR instance if initialized
         self.use_tesseract = False  # Whether to use pytesseract fallback
-        self.backend = None  # 'paddle' | 'tesseract' | None
+        self.backend = None  # 'easyocr' | 'paddle' | 'tesseract' | None
         self._initialize_ocr()
 
     def _initialize_ocr(self):
-        """Initialize OCR engine (PaddleOCR preferred, Tesseract fallback)."""
-        # Try PaddleOCR first
+        """Initialize OCR engine (EasyOCR preferred, then PaddleOCR, Tesseract fallback)."""
+        # Try EasyOCR first
+        if EASYOCR_AVAILABLE:
+            try:
+                # Initialize with English; extend as needed
+                self.easy_reader = easyocr.Reader(['en'], gpu=False)
+                self.use_tesseract = False
+                self.backend = 'easyocr'
+                logger.info("EasyOCR initialized successfully")
+                return
+            except Exception as e:
+                logger.warning(f"EasyOCR initialization failed: {e}. Will try alternate OCR engines.")
+                self.easy_reader = None
+
+        # Try PaddleOCR next
         if PADDLEOCR_AVAILABLE:
             try:
                 self.ocr_engine = PaddleOCR(
@@ -78,7 +100,7 @@ class OCRService:
                 self.use_tesseract = False
                 self.backend = None
 
-        logger.error("No OCR backend available. Please install paddleocr or tesseract-ocr (with pytesseract).")
+        logger.error("No OCR backend available. Please install easyocr, paddleocr or tesseract-ocr (with pytesseract).")
 
     def preprocess_image(self, image_path: str) -> str:
         """
@@ -221,7 +243,54 @@ class OCRService:
         boundaries = self.detect_page_boundaries(processed_image_path)
 
         try:
-            if self.backend == 'paddle' and self.ocr_engine is not None:
+            if self.backend == 'easyocr' and self.easy_reader is not None:
+                result = self.easy_reader.readtext(processed_image_path, detail=1, paragraph=False)
+
+                # Clean up preprocessed image
+                if preprocess and processed_image_path != image_path:
+                    try:
+                        os.unlink(processed_image_path)
+                    except Exception:
+                        pass
+
+                # Process OCR results
+                if not result:
+                    return {
+                        'text': '',
+                        'confidence': 0.0,
+                        'word_count': 0,
+                        'line_count': 0,
+                        'boundaries': boundaries,
+                        'raw_result': []
+                    }
+
+                lines = []
+                total_confidence = 0.0
+                word_count = 0
+                for item in result:
+                    try:
+                        bbox, text, confidence = item
+                    except Exception:
+                        # Some versions may return (bbox, text) only
+                        bbox, text = item[0], item[1]
+                        confidence = 0.0
+                    if text and str(text).strip():
+                        lines.append({'text': str(text), 'confidence': float(confidence), 'bbox': bbox})
+                        total_confidence += float(confidence)
+                        word_count += len(str(text).split())
+
+                avg_confidence = total_confidence / len(lines) if lines else 0.0
+                full_text = ' '.join([line['text'] for line in lines])
+                return {
+                    'text': full_text,
+                    'confidence': avg_confidence,
+                    'word_count': word_count,
+                    'line_count': len(lines),
+                    'boundaries': boundaries,
+                    'lines': lines,
+                    'raw_result': result
+                }
+            elif self.backend == 'paddle' and self.ocr_engine is not None:
                 result = self.ocr_engine.ocr(processed_image_path, cls=True)
 
                 # Clean up preprocessed image
