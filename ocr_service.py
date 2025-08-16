@@ -1,10 +1,9 @@
 """
-OCR Service with EasyOCR and Tesseract fallback
+OCR Service using Tesseract (pytesseract)
 
 This service handles optical character recognition (OCR) for scanned images,
 extracting text with confidence scores and page detection capabilities.
-It uses EasyOCR if available, and falls back to Tesseract via pytesseract
-when EasyOCR is unavailable.
+It uses Tesseract via pytesseract as the primary and only OCR backend.
 """
 
 import os
@@ -13,86 +12,44 @@ import cv2
 import numpy as np
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
-import json
 from PIL import Image, ImageEnhance, ImageFilter
 import tempfile
 
-# Try EasyOCR (preferred)
-try:
-    import easyocr  # type: ignore
-    EASYOCR_AVAILABLE = True
-except Exception:
-    EASYOCR_AVAILABLE = False
-    logging.warning("EasyOCR not available. Falling back to other OCR engines if present.")
-
-# PaddleOCR removed; using EasyOCR or Tesseract only
-PADDLEOCR_AVAILABLE = False
-
-# Try pytesseract for fallback
+# Tesseract OCR
 try:
     import pytesseract  # type: ignore
     TESSERACT_AVAILABLE = True
 except Exception:
     TESSERACT_AVAILABLE = False
-    logging.warning("pytesseract not available. If EasyOCR is missing, OCR will be unavailable.")
 
 # Setup logging
 logger = logging.getLogger(__name__)
 
 
 class OCRService:
-    """Service for handling OCR operations using EasyOCR (preferred) with Tesseract fallback"""
+    """Service for handling OCR operations using Tesseract (pytesseract) only"""
 
     def __init__(self):
-        self.easy_reader = None  # EasyOCR reader instance
-        self.ocr_engine = None  # Legacy OCR engine placeholder (unused)
-        self.use_tesseract = False  # Whether to use pytesseract fallback
-        self.backend = None  # 'easyocr' | 'tesseract' | None
+        self.use_tesseract = False  # Whether to use pytesseract
+        self.backend = None  # 'tesseract' | None
         self._initialize_ocr()
 
     def _initialize_ocr(self):
-        """Initialize OCR engine (EasyOCR preferred with Tesseract fallback)."""
-        # Try EasyOCR first
-        if EASYOCR_AVAILABLE:
-            try:
-                # Initialize with English; extend as needed
-                # Ensure model directory is writable to avoid init failures
-                model_dir_env = os.getenv('EASYOCR_MODEL_DIR', '')
-                default_model_dir = Path(__file__).parent / 'models' / 'easyocr'
-                model_dir = Path(model_dir_env) if model_dir_env else default_model_dir
-                try:
-                    model_dir.mkdir(parents=True, exist_ok=True)
-                except Exception as md_e:
-                    logger.warning(f"Failed to create EasyOCR model directory at {model_dir}: {md_e}")
-                self.easy_reader = easyocr.Reader(
-                    ['en'],
-                    gpu=False,
-                    download_enabled=True,
-                    model_storage_directory=str(model_dir)
-                )
-                self.use_tesseract = False
-                self.backend = 'easyocr'
-                logger.info("EasyOCR initialized successfully")
-                return
-            except Exception as e:
-                logger.warning(f"EasyOCR initialization failed: {e}. Will try alternate OCR engines.")
-                self.easy_reader = None
-
-        
-        # Fallback to pytesseract if available and Tesseract binary is present
+        """Initialize OCR engine (Tesseract only)."""
         if TESSERACT_AVAILABLE:
             try:
+                # Validate that the tesseract binary is available
                 _ = pytesseract.get_tesseract_version()
                 self.use_tesseract = True
                 self.backend = 'tesseract'
-                logger.info("Tesseract (pytesseract) fallback enabled for OCR")
+                logger.info("Tesseract (pytesseract) initialized successfully")
                 return
             except Exception as e:
                 logger.error(f"Tesseract is not operational (binary missing?): {e}")
                 self.use_tesseract = False
                 self.backend = None
 
-        logger.error("No OCR backend available. Please install easyocr or tesseract-ocr (with pytesseract).")
+        logger.error("No OCR backend available. Please install tesseract-ocr (with pytesseract).")
 
     def preprocess_image(self, image_path: str) -> str:
         """
@@ -178,7 +135,7 @@ class OCRService:
             return None
 
     def _ocr_with_tesseract(self, image_path: str, boundaries: Optional[Tuple[int, int, int, int]] = None) -> Dict:
-        """OCR using pytesseract fallback"""
+        """OCR using pytesseract"""
         # Note: Requires Tesseract binary installed on the system.
         image = Image.open(image_path)
         data = pytesseract.image_to_data(image, output_type=pytesseract.Output.DICT)
@@ -214,7 +171,7 @@ class OCRService:
 
     def extract_text_from_image(self, image_path: str, preprocess: bool = True) -> Dict:
         """
-        Extract text from a single image using available OCR backend
+        Extract text from a single image using Tesseract backend
 
         Args:
             image_path: Path to the image file
@@ -224,7 +181,7 @@ class OCRService:
             Dictionary containing extracted text and metadata
         """
         if not self.is_available():
-            raise Exception("OCR service is not available. Please check EasyOCR/Tesseract installation.")
+            raise Exception("OCR service is not available. Please check Tesseract installation.")
 
         # Preprocess image if requested
         processed_image_path = image_path
@@ -235,63 +192,14 @@ class OCRService:
         boundaries = self.detect_page_boundaries(processed_image_path)
 
         try:
-            if self.backend == 'easyocr' and self.easy_reader is not None:
-                result = self.easy_reader.readtext(processed_image_path, detail=1, paragraph=False)
-
-                # Clean up preprocessed image
-                if preprocess and processed_image_path != image_path:
-                    try:
-                        os.unlink(processed_image_path)
-                    except Exception:
-                        pass
-
-                # Process OCR results
-                if not result:
-                    return {
-                        'text': '',
-                        'confidence': 0.0,
-                        'word_count': 0,
-                        'line_count': 0,
-                        'boundaries': boundaries,
-                        'raw_result': []
-                    }
-
-                lines = []
-                total_confidence = 0.0
-                word_count = 0
-                for item in result:
-                    try:
-                        bbox, text, confidence = item
-                    except Exception:
-                        # Some versions may return (bbox, text) only
-                        bbox, text = item[0], item[1]
-                        confidence = 0.0
-                    if text and str(text).strip():
-                        lines.append({'text': str(text), 'confidence': float(confidence), 'bbox': bbox})
-                        total_confidence += float(confidence)
-                        word_count += len(str(text).split())
-
-                avg_confidence = total_confidence / len(lines) if lines else 0.0
-                full_text = ' '.join([line['text'] for line in lines])
-                return {
-                    'text': full_text,
-                    'confidence': avg_confidence,
-                    'word_count': word_count,
-                    'line_count': len(lines),
-                    'boundaries': boundaries,
-                    'lines': lines,
-                    'raw_result': result
-                }
-            else:
-                # Tesseract fallback
-                result = self._ocr_with_tesseract(processed_image_path, boundaries)
-                # Clean up preprocessed image
-                if preprocess and processed_image_path != image_path:
-                    try:
-                        os.unlink(processed_image_path)
-                    except Exception:
-                        pass
-                return result
+            result = self._ocr_with_tesseract(processed_image_path, boundaries)
+            # Clean up preprocessed image
+            if preprocess and processed_image_path != image_path:
+                try:
+                    os.unlink(processed_image_path)
+                except Exception:
+                    pass
+            return result
         except Exception as e:
             logger.error(f"OCR extraction failed for {image_path}: {e}")
             raise Exception(f"Failed to extract text from image: {str(e)}")
@@ -307,7 +215,7 @@ class OCRService:
             Dictionary containing results for all images
         """
         if not self.is_available():
-            raise Exception("OCR service is not available. Please check EasyOCR/Tesseract installation.")
+            raise Exception("OCR service is not available. Please check Tesseract installation.")
 
         results = {
             'pages': [],
@@ -359,9 +267,7 @@ class OCRService:
         return results
 
     def is_available(self) -> bool:
-        """Check if OCR service is available"""
-        if self.backend == 'easyocr' and self.easy_reader is not None:
-            return True
+        """Check if OCR service is available (Tesseract)"""
         if self.backend == 'tesseract' and TESSERACT_AVAILABLE and self.use_tesseract:
             return True
         return False
