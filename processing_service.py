@@ -263,42 +263,68 @@ class ProcessingService:
         start_time = time.time()
         
         try:
-            job_manager.update_job_progress(job_id, "Extracting text from PDF...")
+            # PDF -> Images (pdf2image) -> OCR (Tesseract) pipeline
+            job_manager.update_job_progress(job_id, "Converting PDF pages to images...")
             
-            # Import PDF processor
-            from pdf_processor import pdf_processor
-            
-            # Extract text from PDF
             loop = asyncio.get_event_loop()
-            extracted_text = await loop.run_in_executor(
+
+            # Convert PDF to images
+            def _convert_pdf_to_images(_pdf_path: str) -> list[str]:
+                from pdf2image import convert_from_path
+                from pathlib import Path as _Path
+                import tempfile as _tempfile
+                imgs = convert_from_path(_pdf_path, dpi=300)
+                out_paths = []
+                temp_dir = _Path(OUTPUT_DIR) / f"{job_id}_pdf_pages"
+                try:
+                    temp_dir.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
+                for idx, img in enumerate(imgs):
+                    out_path = temp_dir / f"{_Path(_pdf_path).stem}_page_{idx+1:03d}.png"
+                    img.save(str(out_path), format='PNG')
+                    out_paths.append(str(out_path))
+                return out_paths
+            
+            image_paths = await loop.run_in_executor(executor, _convert_pdf_to_images, pdf_path)
+            if not image_paths:
+                raise Exception("Failed to render PDF pages. Please ensure the PDF is not corrupted.")
+
+            # Run OCR on rendered images (same as page scan pipeline)
+            job_manager.update_job_progress(job_id, f"Running OCR on {len(image_paths)} pages...")
+            from ocr_service import ocr_service
+            ocr_results = await loop.run_in_executor(
                 executor,
-                pdf_processor.extract_text_from_pdf,
-                pdf_path
+                ocr_service.process_multiple_images,
+                image_paths
             )
-            
-            if not extracted_text or len(extracted_text.strip()) < 100:
-                raise Exception("PDF appears to be empty or contains insufficient text content")
-            
-            # Save extracted text
+
+            if not ocr_results['total_text'] or len(ocr_results['total_text'].strip()) < 100:
+                raise Exception("PDF appears to contain insufficient readable text after OCR.")
+
+            # Save OCR results and extracted text
+            ocr_results_file = OUTPUT_DIR / f"{job_id}_ocr_results.json"
+            file_utils.write_file_safely(str(ocr_results_file), json.dumps(ocr_results, indent=2))
+
             extracted_text_file = OUTPUT_DIR / f"{job_id}_extracted_text.txt"
-            file_utils.write_file_safely(str(extracted_text_file), extracted_text)
-            
+            file_utils.write_file_safely(str(extracted_text_file), ocr_results['total_text'])
+
             # Generate structured notes if Groq is available
             structured_notes = None
             if groq_generator.is_available():
-                job_manager.update_job_progress(job_id, "Generating structured learning notes...")
-                logger.info(f"Generating structured notes for PDF job {job_id}")
-                
+                job_manager.update_job_progress(job_id, "Generating structured learning notes from OCR text...")
+                logger.info(f"Generating structured notes for PDF OCR job {job_id}")
+
                 structured_notes = await loop.run_in_executor(
                     executor,
                     groq_generator.generate_pdf_notes,
-                    extracted_text
+                    ocr_results['total_text']
                 )
-                
+
                 if structured_notes:
                     logger.info(f"Successfully generated structured notes for PDF job {job_id}")
                     await self._save_notes_files(job_id, structured_notes)
-                    
+
                     # Save to R2 storage if available
                     if r2_storage.is_available():
                         try:
@@ -307,9 +333,11 @@ class ProcessingService:
                                 "user_id": user_id,
                                 "processing_date": datetime.now().isoformat(),
                                 "file_type": "pdf_notes",
+                                "page_count": ocr_results['page_count'],
+                                "successful_pages": ocr_results['successful_pages'],
+                                "average_confidence": ocr_results['total_confidence'],
                                 "processing_time": time.time() - start_time
                             }
-                            
                             r2_key = r2_storage.save_notes(job_id, structured_notes, metadata, user_id)
                             if r2_key:
                                 logger.info(f"✅ PDF notes saved to R2 storage: {r2_key}")
@@ -319,7 +347,7 @@ class ProcessingService:
                             logger.error(f"❌ R2 storage error: {e}")
                 else:
                     logger.warning(f"Failed to generate structured notes for PDF job {job_id}")
-            
+
             # Deduct credits only after successful processing and note generation
             if user_id and self.db and structured_notes:
                 try:
@@ -328,25 +356,29 @@ class ProcessingService:
                         user_id=user_id,
                         action=CreditAction.PDF_UPLOAD
                     )
-                    
+
                     if not credit_result.has_credits:
                         logger.warning(f"⚠️ Credit deduction failed for PDF job {job_id}: {credit_result.message}")
-                        # Don't fail the job, but log the issue
                     else:
                         logger.info(f"✅ Credits deducted successfully for PDF job {job_id}: {credit_result.message}")
-                        
+
                 except Exception as credit_error:
                     logger.error(f"❌ Credit deduction error for PDF job {job_id}: {credit_error}")
                     # Don't fail the job due to credit issues
-            
+
             # Set job as completed
             result_data = {
-                "extracted_text": extracted_text[:500] + "..." if len(extracted_text) > 500 else extracted_text,
-                "text_length": len(extracted_text),
+                "extracted_text": ocr_results['total_text'][:500] + "..." if len(ocr_results['total_text']) > 500 else ocr_results['total_text'],
+                "text_length": len(ocr_results['total_text']),
+                "page_count": ocr_results['page_count'],
+                "successful_pages": ocr_results['successful_pages'],
+                "failed_pages": len(ocr_results['failed_pages']),
+                "average_confidence": ocr_results['total_confidence'],
+                "word_count": ocr_results['total_word_count'],
                 "has_notes": structured_notes is not None,
                 "notes_preview": structured_notes[:200] + "..." if structured_notes and len(structured_notes) > 200 else structured_notes,
                 "processing_time": time.time() - start_time,
-                "credits_deducted": user_id and self.db and structured_notes  # Indicate if credits were deducted
+                "credits_deducted": user_id and self.db and structured_notes
             }
             job_manager.set_job_completed(job_id, result_data)
             
