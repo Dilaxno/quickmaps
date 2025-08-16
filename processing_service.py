@@ -389,7 +389,7 @@ class ProcessingService:
             
             # Check if OCR service is available
             if not ocr_service.is_available():
-                raise Exception("OCR service is not available. Please check PaddleOCR installation.")
+                raise Exception("OCR service is not available. Please check EasyOCR installation.")
             
             # Process all images with OCR
             loop = asyncio.get_event_loop()

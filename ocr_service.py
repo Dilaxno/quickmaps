@@ -1,10 +1,10 @@
 """
-OCR Service with PaddleOCR and Tesseract fallback
+OCR Service with EasyOCR and Tesseract fallback
 
 This service handles optical character recognition (OCR) for scanned images,
 extracting text with confidence scores and page detection capabilities.
-It prefers PaddleOCR if available, and falls back to Tesseract via pytesseract
-when PaddleOCR is unavailable.
+It uses EasyOCR if available, and falls back to Tesseract via pytesseract
+when EasyOCR is unavailable.
 """
 
 import os
@@ -25,13 +25,8 @@ except Exception:
     EASYOCR_AVAILABLE = False
     logging.warning("EasyOCR not available. Falling back to other OCR engines if present.")
 
-# Try PaddleOCR
-try:
-    from paddleocr import PaddleOCR  # type: ignore
-    PADDLEOCR_AVAILABLE = True
-except Exception:
-    PADDLEOCR_AVAILABLE = False
-    logging.warning("PaddleOCR not available. Will try Tesseract fallback if present.")
+# PaddleOCR removed; using EasyOCR or Tesseract only
+PADDLEOCR_AVAILABLE = False
 
 # Try pytesseract for fallback
 try:
@@ -39,24 +34,24 @@ try:
     TESSERACT_AVAILABLE = True
 except Exception:
     TESSERACT_AVAILABLE = False
-    logging.warning("pytesseract not available. If EasyOCR/PaddleOCR are missing, OCR will be unavailable.")
+    logging.warning("pytesseract not available. If EasyOCR is missing, OCR will be unavailable.")
 
 # Setup logging
 logger = logging.getLogger(__name__)
 
 
 class OCRService:
-    """Service for handling OCR operations using EasyOCR (preferred), PaddleOCR, with Tesseract fallback"""
+    """Service for handling OCR operations using EasyOCR (preferred) with Tesseract fallback"""
 
     def __init__(self):
         self.easy_reader = None  # EasyOCR reader instance
-        self.ocr_engine = None  # PaddleOCR instance if initialized
+        self.ocr_engine = None  # Legacy OCR engine placeholder (unused)
         self.use_tesseract = False  # Whether to use pytesseract fallback
-        self.backend = None  # 'easyocr' | 'paddle' | 'tesseract' | None
+        self.backend = None  # 'easyocr' | 'tesseract' | None
         self._initialize_ocr()
 
     def _initialize_ocr(self):
-        """Initialize OCR engine (EasyOCR preferred, then PaddleOCR, Tesseract fallback)."""
+        """Initialize OCR engine (EasyOCR preferred with Tesseract fallback)."""
         # Try EasyOCR first
         if EASYOCR_AVAILABLE:
             try:
@@ -70,23 +65,7 @@ class OCRService:
                 logger.warning(f"EasyOCR initialization failed: {e}. Will try alternate OCR engines.")
                 self.easy_reader = None
 
-        # Try PaddleOCR next
-        if PADDLEOCR_AVAILABLE:
-            try:
-                self.ocr_engine = PaddleOCR(
-                    use_angle_cls=True,
-                    lang='en',
-                    use_gpu=False,  # Set to True if GPU is available
-                    show_log=False  # Reduce verbose logging
-                )
-                self.use_tesseract = False
-                self.backend = 'paddle'
-                logger.info("PaddleOCR initialized successfully")
-                return
-            except Exception as e:
-                logger.warning(f"PaddleOCR initialization failed: {e}. Will try Tesseract fallback.")
-                self.ocr_engine = None
-
+        
         # Fallback to pytesseract if available and Tesseract binary is present
         if TESSERACT_AVAILABLE:
             try:
@@ -100,7 +79,7 @@ class OCRService:
                 self.use_tesseract = False
                 self.backend = None
 
-        logger.error("No OCR backend available. Please install easyocr, paddleocr or tesseract-ocr (with pytesseract).")
+        logger.error("No OCR backend available. Please install easyocr or tesseract-ocr (with pytesseract).")
 
     def preprocess_image(self, image_path: str) -> str:
         """
@@ -232,7 +211,7 @@ class OCRService:
             Dictionary containing extracted text and metadata
         """
         if not self.is_available():
-            raise Exception("OCR service is not available. Please check PaddleOCR/Tesseract installation.")
+            raise Exception("OCR service is not available. Please check EasyOCR/Tesseract installation.")
 
         # Preprocess image if requested
         processed_image_path = image_path
@@ -290,48 +269,6 @@ class OCRService:
                     'lines': lines,
                     'raw_result': result
                 }
-            elif self.backend == 'paddle' and self.ocr_engine is not None:
-                result = self.ocr_engine.ocr(processed_image_path, cls=True)
-
-                # Clean up preprocessed image
-                if preprocess and processed_image_path != image_path:
-                    try:
-                        os.unlink(processed_image_path)
-                    except Exception:
-                        pass
-
-                # Process OCR results
-                if not result or not result[0]:
-                    return {
-                        'text': '',
-                        'confidence': 0.0,
-                        'word_count': 0,
-                        'line_count': 0,
-                        'boundaries': boundaries,
-                        'raw_result': []
-                    }
-
-                lines = []
-                total_confidence = 0.0
-                word_count = 0
-                for line in result[0]:
-                    if line:
-                        bbox, (text, confidence) = line
-                        lines.append({'text': text, 'confidence': confidence, 'bbox': bbox})
-                        total_confidence += float(confidence)
-                        word_count += len(text.split())
-
-                avg_confidence = total_confidence / len(lines) if lines else 0.0
-                full_text = ' '.join([line['text'] for line in lines])
-                return {
-                    'text': full_text,
-                    'confidence': avg_confidence,
-                    'word_count': word_count,
-                    'line_count': len(lines),
-                    'boundaries': boundaries,
-                    'lines': lines,
-                    'raw_result': result[0] if result else []
-                }
             else:
                 # Tesseract fallback
                 result = self._ocr_with_tesseract(processed_image_path, boundaries)
@@ -357,7 +294,7 @@ class OCRService:
             Dictionary containing results for all images
         """
         if not self.is_available():
-            raise Exception("OCR service is not available. Please check PaddleOCR/Tesseract installation.")
+            raise Exception("OCR service is not available. Please check EasyOCR/Tesseract installation.")
 
         results = {
             'pages': [],
@@ -410,7 +347,7 @@ class OCRService:
 
     def is_available(self) -> bool:
         """Check if OCR service is available"""
-        if self.backend == 'paddle' and self.ocr_engine is not None:
+        if self.backend == 'easyocr' and self.easy_reader is not None:
             return True
         if self.backend == 'tesseract' and TESSERACT_AVAILABLE and self.use_tesseract:
             return True
