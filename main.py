@@ -542,6 +542,7 @@ async def process_udemy_url(
     background_tasks: BackgroundTasks,
     url: str = Form(...),
     request: Request = None,
+    cookies_file: UploadFile | None = File(None),
 ):
     """Process a Udemy course URL and transcribe it"""
     
@@ -571,11 +572,25 @@ async def process_udemy_url(
     )
     
     try:
+        # Optionally save cookies.txt if provided
+        cookies_path = None
+        try:
+            if cookies_file and cookies_file.filename:
+                cookies_dest = UPLOAD_DIR / f"{job_id}_cookies.txt"
+                import shutil as _shutil
+                with open(cookies_dest, "wb") as _out:
+                    _shutil.copyfileobj(cookies_file.file, _out)
+                cookies_path = str(cookies_dest)
+                logger.info(f"Saved cookies file for job {job_id} to {cookies_path}")
+        except Exception as ce:
+            logger.warning(f"Failed to save cookies file for job {job_id}: {ce}")
+            cookies_path = None
+
         # Set job to processing status before starting background task
         job_manager.update_job_status(job_id, "processing", "Starting Udemy course download...")
         
         # Start background download and transcription using the same processing service
-        background_tasks.add_task(processing_service.process_youtube_url, job_id, url, user_id)
+        background_tasks.add_task(processing_service.process_youtube_url, job_id, url, user_id, cookies_path)
         
         return {"job_id": job_id, "message": "Udemy course download started. Transcription will follow."}
     

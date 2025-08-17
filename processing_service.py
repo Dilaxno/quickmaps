@@ -183,7 +183,7 @@ class ProcessingService:
             if CLEANUP_TEMP_FILES:
                 file_utils.cleanup_temp_files(job_id, video_path)
     
-    async def process_youtube_url(self, job_id: str, url: str, user_id: Optional[str] = None):
+    async def process_youtube_url(self, job_id: str, url: str, user_id: Optional[str] = None, cookies_path: Optional[str] = None):
         """
         Process YouTube URL
         
@@ -213,7 +213,8 @@ class ProcessingService:
                 executor,
                 youtube_service.download_video,
                 url,
-                str(TEMP_DIR)
+                str(TEMP_DIR),
+                cookies_path
             )
             
             logger.info(f"{platform} download completed for job {job_id}: {video_path}")

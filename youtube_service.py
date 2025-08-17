@@ -41,7 +41,7 @@ class YouTubeService:
         return 'udemy.com' in url.lower()
     
     @staticmethod
-    def download_video(url: str, output_path: str) -> str:
+    def download_video(url: str, output_path: str, cookies_path: str | None = None) -> str:
         """
         Download video from YouTube URL
         
@@ -107,7 +107,7 @@ class YouTubeService:
             'no_warnings': False,
             'extract_flat': False,
             # Cookies and session handling
-            'cookiefile': None,
+            'cookiefile': cookies_path if cookies_path else None,
             'cookiesfrombrowser': None,
         }
         
@@ -124,7 +124,10 @@ class YouTubeService:
             })
         
         try:
-            logger.info(f"Starting download for {platform} content: {url}")
+            if cookies_path:
+                logger.info(f"Starting download for {platform} content with cookies file: {cookies_path}")
+            else:
+                logger.info(f"Starting download for {platform} content: {url}")
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
                 filename = ydl.prepare_filename(info)
