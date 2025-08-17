@@ -424,14 +424,6 @@ async def options_handler(path: str):
     """Handle preflight OPTIONS requests"""
     return {"message": "OK"}
 
-# Explicit preflight handlers for common upload endpoints (some proxies require concrete routes)
-@app.options("/upload-audio")
-async def options_upload_audio_no_slash():
-    return Response(status_code=204)
-
-@app.options("/upload-audio/")
-async def options_upload_audio_slash():
-    return Response(status_code=204)
 
 # Basic endpoints
 @app.get("/")
@@ -770,48 +762,96 @@ async def upload_video(
         logger.error(f"Video upload failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to upload video file. Please try again.")
 
-# Audio upload endpoint
-@app.post("/upload-audio/")
+# Audio upload endpoint (rebuilt; handles CORS preflight explicitly)
+
+def _cors_headers_for_request(request: Request) -> dict:
+    try:
+        req_origin = request.headers.get("origin")
+        if req_origin in allowed_origins:
+            return {
+                "Access-Control-Allow-Origin": req_origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Vary": "Origin"
+            }
+    except Exception:
+        pass
+    # Fallback: first allowed or wildcard
+    hdr = {"Access-Control-Allow-Credentials": "true", "Vary": "Origin"}
+    try:
+        if allowed_origins:
+            hdr["Access-Control-Allow-Origin"] = allowed_origins[0]
+        else:
+            hdr["Access-Control-Allow-Origin"] = "*"
+    except Exception:
+        hdr["Access-Control-Allow-Origin"] = "*"
+    return hdr
+
+
+def _preflight_headers(request: Request) -> dict:
+    base = _cors_headers_for_request(request)
+    base.update({
+        "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+        "Access-Control-Allow-Headers": request.headers.get(
+            "Access-Control-Request-Headers",
+            "Authorization,Content-Type,Accept,X-Requested-With"
+        ),
+    })
+    return base
+
+
+@app.api_route("/upload-audio", methods=["POST", "OPTIONS"])
+@app.api_route("/upload-audio/", methods=["POST", "OPTIONS"])
 async def upload_audio(
+    request: Request,
     background_tasks: BackgroundTasks,
-    audio_file: UploadFile = File(...),
-    request: Request = None,
+    audio_file: UploadFile = File(None),
 ):
+    # Handle preflight explicitly
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=_preflight_headers(request))
+
     """Handle audio file upload and processing"""
-    
-    # Validate file type
+    if audio_file is None:
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "No audio file provided"},
+            headers=_cors_headers_for_request(request)
+        )
+
+    # Validate file type/size
     allowed_extensions = ['.mp3', '.wav', '.m4a', '.aac', '.ogg', '.webm']
     file_extension = Path(audio_file.filename).suffix.lower()
     if file_extension not in allowed_extensions:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Invalid file type. Please upload an audio file with one of these extensions: {', '.join(allowed_extensions)}"
+        return JSONResponse(
+            status_code=400,
+            content={"detail": f"Invalid file type. Please upload an audio file with one of these extensions: {', '.join(allowed_extensions)}"},
+            headers=_cors_headers_for_request(request)
         )
-    
-    # Check file size (limit to 500MB for audio files)
+
     if audio_file.size and audio_file.size > 500 * 1024 * 1024:
-        raise HTTPException(
-            status_code=400, 
-            detail="Audio file is too large. Please upload a file smaller than 500MB."
+        return JSONResponse(
+            status_code=400,
+            content={"detail": "Audio file is too large. Please upload a file smaller than 500MB."},
+            headers=_cors_headers_for_request(request)
         )
-    
-    # Extract user information from Firebase token
+
+    # Extract user information
     user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
-    
+
     # Only check if user has credits (don't deduct yet)
     if user_id and db:
         from credit_service import CreditAction
         credit_result = await credit_service.check_credits(
             user_id=user_id,
-            action=CreditAction.VIDEO_UPLOAD  # Use VIDEO_UPLOAD action for audio as well
+            action=CreditAction.VIDEO_UPLOAD
         )
-        
         if not credit_result.has_credits:
-            raise HTTPException(
+            return JSONResponse(
                 status_code=402,
-                detail=f"Insufficient credits. {credit_result.message}"
+                content={"detail": f"Insufficient credits. {credit_result.message}"},
+                headers=_cors_headers_for_request(request)
             )
-    
+
     # Create job
     job_id = job_manager.create_job(
         user_id=user_id,
@@ -819,29 +859,32 @@ async def upload_audio(
         user_name=user_name,
         action_type="AUDIO_UPLOAD"
     )
-    
+
     try:
         # Save uploaded file temporarily
         file_path = UPLOAD_DIR / f"{job_id}_{audio_file.filename}"
         with open(file_path, "wb") as buffer:
             shutil.copyfileobj(audio_file.file, buffer)
-        
+
         # Set job to processing status before starting background task
         job_manager.update_job_status(job_id, "processing", "Starting audio processing...")
-        
+
         # Start background processing (use the same video processing pipeline)
         background_tasks.add_task(processing_service.process_video_file, job_id, str(file_path), user_id)
-        
-        return {"job_id": job_id, "message": "Audio uploaded successfully. Processing started."}
-    
+
+        return JSONResponse(
+            status_code=200,
+            content={"job_id": job_id, "message": "Audio uploaded successfully. Processing started."},
+            headers=_cors_headers_for_request(request)
+        )
     except Exception as e:
         job_manager.set_job_error(job_id, str(e))
         logger.error(f"Audio upload failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to upload audio file. Please try again.")
-
-# Also expose no-trailing-slash variant for proxies/clients that strip slashes
-# This ensures POST /upload-audio works the same as /upload-audio/
-app.add_api_route("/upload-audio", upload_audio, methods=["POST"])
+        return JSONResponse(
+            status_code=500,
+            content={"detail": "Failed to upload audio file. Please try again."},
+            headers=_cors_headers_for_request(request)
+        )
 
 # Page scan endpoint
 @app.post("/process-page-scan/")
