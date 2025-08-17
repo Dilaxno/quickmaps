@@ -67,7 +67,7 @@ def create_test_payment_payload(user_id: str, plan_id: str = "student", billing_
     
     plan_configs = {
         "student": {
-            "monthly": {"credits": 1000, "price": 9},
+            "monthly": {"credits": 1000, "price": 12},
             "yearly": {"credits": 12000, "price": 65}
         },
         "researcher": {
