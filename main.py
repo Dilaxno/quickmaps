@@ -4193,13 +4193,6 @@ async def register_user(user_data: RegisterUserRequest, request: Request):
             raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
         
         logger.info(f"👤 Registering new user: {email}")
-        # Enforce email OTP verification on signup: send code and require verification before proceeding
-        try:
-            email_verification_service.expiry_minutes = 1  # 60 seconds (service stores minutes but email content uses seconds)
-            email_verification_service.resend_cooldown_seconds = 60
-            _ = email_verification_service.create_and_send(email, user_data.name or (email.split('@')[0]))
-        except Exception as _e:
-            logger.warning(f"Failed to send OTP at signup for {email}: {_e}")
         
         # Create user in Firebase Authentication
         try:
@@ -4995,11 +4988,11 @@ async def verify_email_otp(req: VerifyOtpRequest):
     return {"message": "Email verified", "success": True}
 
 @app.get("/verify-email")
+# Email verification OTP endpoints
 from email_verification_service import email_verification_service
 
 class SendOtpRequest(BaseModel):
     email: str
-    name: Optional[str] = None
 
 class VerifyOtpRequest(BaseModel):
     email: str
@@ -5007,53 +5000,19 @@ class VerifyOtpRequest(BaseModel):
 
 @app.post("/api/auth/send-email-otp")
 async def send_email_otp(req: SendOtpRequest):
-    """Send a verification OTP to the provided email. Enforces 60s cooldown."""
-    try:
-        # Force 60 second expiry regardless of env default
-        email_verification_service.expiry_minutes = max(1, int(os.getenv('EMAIL_OTP_EXPIRY_MINUTES', '1')))
-        # Set resend cooldown to 60 seconds
-        email_verification_service.resend_cooldown_seconds = 60
-        # Create and send OTP
-        result = email_verification_service.create_and_send(req.email, req.name)
-        if not result.get("success"):
-            err = result.get("error", "EMAIL_FAILED")
-            msg = result.get("message", "Failed to send verification email")
-            raise HTTPException(status_code=400, detail=get_context_specific_error(err, "email_verification") or msg)
-        return {"success": True, "message": "Verification code sent"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"/api/auth/send-email-otp failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send verification code. Please try again.")
+    """OTP disabled: respond with success to avoid blocking legacy clients"""
+    return {"message": "OTP disabled", "success": True}
 
 @app.post("/api/auth/verify-email-otp")
 async def verify_email_otp(req: VerifyOtpRequest):
-    """Verify an OTP code for the provided email."""
-    try:
-        result = email_verification_service.verify(req.email, req.otp)
-        if not result.get("success"):
-            err = result.get("error", "INVALID_CODE")
-            msg = result.get("message", "Invalid verification code")
-            raise HTTPException(status_code=400, detail=get_context_specific_error(err, "email_verification") or msg)
-        return {"success": True, "message": "Email verified"}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"/api/auth/verify-email-otp failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to verify code. Please try again.")
+    """OTP disabled: treat as verified for backward compatibility"""
+    return {"message": "Email verified", "success": True}
 
 @app.get("/verify-email")
 async def verify_email_via_url(email: str, code: str):
-    """Verify via URL parameters and redirect accordingly."""
+    """OTP disabled: always redirect to dashboard as verified"""
     from fastapi.responses import RedirectResponse
-    try:
-        res = email_verification_service.verify(email, code)
-        if res.get("success"):
-            return RedirectResponse(url=f"{os.getenv('FRONTEND_URL', 'https://quickmaps.pro')}/verified?status=success")
-        else:
-            return RedirectResponse(url=f"{os.getenv('FRONTEND_URL', 'https://quickmaps.pro')}/verified?status=failed&reason={res.get('error','invalid')}")
-    except Exception:
-        return RedirectResponse(url=f"{os.getenv('FRONTEND_URL', 'https://quickmaps.pro')}/verified?status=failed")
+    return RedirectResponse(url=f"{os.getenv('FRONTEND_URL', 'https://quickmaps.pro')}")
     return RedirectResponse(
         url="https://quickmaps.pro/dashboard?verified=true",
         status_code=302
