@@ -229,10 +229,6 @@ class ProcessingService:
                 platform = "TED Talk"
                 job_manager.update_job_progress(job_id, "Downloading TED Talk...")
                 logger.info(f"Starting TED Talk download for job {job_id}: {url}")
-            elif 'khanacademy.org' in url.lower():
-                platform = "Khan Academy video"
-                job_manager.update_job_progress(job_id, "Downloading video from Khan Academy...")
-                logger.info(f"Starting Khan Academy download for job {job_id}: {url}")
             else:
                 platform = "YouTube video"
                 job_manager.update_job_progress(job_id, "Downloading video from YouTube...")
@@ -300,22 +296,28 @@ class ProcessingService:
             
             loop = asyncio.get_event_loop()
 
-            # Convert PDF to images
+            # Convert PDF to images using PyMuPDF (fitz)
             def _convert_pdf_to_images(_pdf_path: str) -> list[str]:
-                from pdf2image import convert_from_path
+                import fitz  # PyMuPDF
                 from pathlib import Path as _Path
-                import tempfile as _tempfile
-                imgs = convert_from_path(_pdf_path, dpi=300)
                 out_paths = []
                 temp_dir = _Path(OUTPUT_DIR) / f"{job_id}_pdf_pages"
                 try:
                     temp_dir.mkdir(parents=True, exist_ok=True)
                 except Exception:
                     pass
-                for idx, img in enumerate(imgs):
-                    out_path = temp_dir / f"{_Path(_pdf_path).stem}_page_{idx+1:03d}.png"
-                    img.save(str(out_path), format='PNG')
-                    out_paths.append(str(out_path))
+                doc = fitz.open(_pdf_path)
+                try:
+                    # Approximate 300 DPI: scale = 300 / 72 ~= 4.1667
+                    zoom = 300.0 / 72.0
+                    mat = fitz.Matrix(zoom, zoom)
+                    for idx, page in enumerate(doc):
+                        pix = page.get_pixmap(matrix=mat, alpha=False)
+                        out_path = temp_dir / f"{_Path(_pdf_path).stem}_page_{idx+1:03d}.png"
+                        pix.save(str(out_path))
+                        out_paths.append(str(out_path))
+                finally:
+                    doc.close()
                 return out_paths
             
             image_paths = await loop.run_in_executor(executor, _convert_pdf_to_images, pdf_path)

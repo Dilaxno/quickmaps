@@ -585,60 +585,6 @@ async def download_tedtalk(
         logger.error(f"TED Talk download failed: {e}")
         raise HTTPException(status_code=500, detail="We're having trouble downloading this TED Talk. Please check the URL and try again.")
 
-# Khan Academy download endpoint
-@app.post("/download-khanacademy/")
-async def download_khanacademy(
-    background_tasks: BackgroundTasks,
-    url: str = Form(...),
-    request: Request = None,
-):
-    """Download video from Khan Academy URL (or YouTube mirror) and transcribe it"""
-
-    # Validate Khan Academy or YouTube URL
-    if not any(domain in url.lower() for domain in ['khanacademy.org', 'youtube.com/watch', 'youtu.be']):
-        raise HTTPException(
-            status_code=400,
-            detail="Please provide a valid Khan Academy URL (khanacademy.org) or YouTube URL"
-        )
-
-    # Extract user information from Firebase token
-    user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
-
-    # Only check if user has credits (don't deduct yet)
-    if user_id and db:
-        from credit_service import CreditAction
-        credit_result = await credit_service.check_credits(
-            user_id=user_id,
-            action=CreditAction.YOUTUBE_DOWNLOAD  # Use same credit action as YouTube
-        )
-
-        if not credit_result.has_credits:
-            raise HTTPException(
-                status_code=402,
-                detail=f"Insufficient credits. {credit_result.message}"
-            )
-
-    # Create job
-    job_id = job_manager.create_job(
-        user_id=user_id,
-        user_email=user_email,
-        user_name=user_name,
-        action_type="KHANACADEMY_DOWNLOAD"
-    )
-
-    try:
-        # Set job to processing status before starting background task
-        job_manager.update_job_status(job_id, "processing", "Starting Khan Academy download...")
-
-        # Start background download and transcription using the same processing service
-        background_tasks.add_task(processing_service.process_youtube_url, job_id, url, user_id)
-
-        return {"job_id": job_id, "message": "Khan Academy download started. Transcription will follow."}
-
-    except Exception as e:
-        job_manager.set_job_error(job_id, str(e))
-        logger.error(f"Khan Academy download failed: {e}")
-        raise HTTPException(status_code=500, detail="We're having trouble downloading this Khan Academy video. Please check the URL and try again.")
 
 # Udemy course URL endpoint
 @app.post("/process-udemy-url/")

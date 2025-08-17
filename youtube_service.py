@@ -40,11 +40,7 @@ class YouTubeService:
         """Check if URL is a Udemy course URL"""
         return 'udemy.com' in url.lower()
     
-    @staticmethod
-    def is_khanacademy_url(url: str) -> bool:
-        """Check if URL is a Khan Academy video URL"""
-        return 'khanacademy.org' in url.lower()
-    
+        
     @staticmethod
     def download_video(url: str, output_path: str, cookies_path: str | None = None) -> str:
         """
@@ -63,7 +59,6 @@ class YouTubeService:
         # Adjust configuration based on URL type
         is_ted = YouTubeService.is_ted_url(url)
         is_udemy = YouTubeService.is_udemy_url(url)
-        is_khan = YouTubeService.is_khanacademy_url(url)
         
         # Determine platform-specific settings
         if is_udemy:
@@ -78,19 +73,14 @@ class YouTubeService:
             sleep_interval = 2
             max_sleep_interval = 8
             retries = 5
-        elif is_khan:
-            platform = 'Khan Academy'
-            referer = 'https://www.khanacademy.org/'
-            sleep_interval = 2
-            max_sleep_interval = 8
-            retries = 5
         else:
             platform = 'YouTube'
             referer = 'https://www.youtube.com/'
             sleep_interval = 1
             max_sleep_interval = 5
             retries = 3
-        
+
+                
         ydl_opts = {
             'format': YTDL_FORMAT,
             'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
@@ -166,11 +156,10 @@ class YouTubeService:
         Fallback download method with different configurations
         """
         is_ted = YouTubeService.is_ted_url(url)
-        is_khan = YouTubeService.is_khanacademy_url(url)
         
-        if is_ted or is_khan:
-            # Educational site-specific fallback configurations (TED/Khan Academy)
-            ref = 'https://www.ted.com/' if is_ted else 'https://www.khanacademy.org/'
+        if is_ted:
+            # Educational site-specific fallback configurations (TED)
+            ref = 'https://www.ted.com/'
             fallback_configs = [
                 # Try with a conservative video format
                 {
