@@ -830,6 +830,10 @@ async def upload_audio(
         logger.error(f"Audio upload failed: {e}")
         raise HTTPException(status_code=500, detail="Failed to upload audio file. Please try again.")
 
+# Also expose no-trailing-slash variant for proxies/clients that strip slashes
+# This ensures POST /upload-audio works the same as /upload-audio/
+app.add_api_route("/upload-audio", upload_audio, methods=["POST"])
+
 # Page scan endpoint
 @app.post("/process-page-scan/")
 async def process_page_scan(
