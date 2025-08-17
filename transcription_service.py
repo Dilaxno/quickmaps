@@ -29,7 +29,7 @@ class TranscriptionService:
         except Exception:
             self.deepgram_timeout = 900
         try:
-            self.deepgram_connect_timeout = int(os.getenv("DEEPGRAM_CONNECT_TIMEOUT_SECONDS", "60"))
+            self.deepgram_connect_timeout = int(os.getenv("DEEPGRAM_CONNECT_TIMEOUT_SECONDS", "180"))
         except Exception:
             self.deepgram_connect_timeout = 60
         if not self.use_deepgram:
