@@ -229,6 +229,10 @@ class ProcessingService:
                 platform = "TED Talk"
                 job_manager.update_job_progress(job_id, "Downloading TED Talk...")
                 logger.info(f"Starting TED Talk download for job {job_id}: {url}")
+            elif 'khanacademy.org' in url.lower():
+                platform = "Khan Academy video"
+                job_manager.update_job_progress(job_id, "Downloading video from Khan Academy...")
+                logger.info(f"Starting Khan Academy download for job {job_id}: {url}")
             else:
                 platform = "YouTube video"
                 job_manager.update_job_progress(job_id, "Downloading video from YouTube...")

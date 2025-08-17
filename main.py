@@ -585,6 +585,61 @@ async def download_tedtalk(
         logger.error(f"TED Talk download failed: {e}")
         raise HTTPException(status_code=500, detail="We're having trouble downloading this TED Talk. Please check the URL and try again.")
 
+# Khan Academy download endpoint
+@app.post("/download-khanacademy/")
+async def download_khanacademy(
+    background_tasks: BackgroundTasks,
+    url: str = Form(...),
+    request: Request = None,
+):
+    """Download video from Khan Academy URL (or YouTube mirror) and transcribe it"""
+
+    # Validate Khan Academy or YouTube URL
+    if not any(domain in url.lower() for domain in ['khanacademy.org', 'youtube.com/watch', 'youtu.be']):
+        raise HTTPException(
+            status_code=400,
+            detail="Please provide a valid Khan Academy URL (khanacademy.org) or YouTube URL"
+        )
+
+    # Extract user information from Firebase token
+    user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+
+    # Only check if user has credits (don't deduct yet)
+    if user_id and db:
+        from credit_service import CreditAction
+        credit_result = await credit_service.check_credits(
+            user_id=user_id,
+            action=CreditAction.YOUTUBE_DOWNLOAD  # Use same credit action as YouTube
+        )
+
+        if not credit_result.has_credits:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Insufficient credits. {credit_result.message}"
+            )
+
+    # Create job
+    job_id = job_manager.create_job(
+        user_id=user_id,
+        user_email=user_email,
+        user_name=user_name,
+        action_type="KHANACADEMY_DOWNLOAD"
+    )
+
+    try:
+        # Set job to processing status before starting background task
+        job_manager.update_job_status(job_id, "processing", "Starting Khan Academy download...")
+
+        # Start background download and transcription using the same processing service
+        background_tasks.add_task(processing_service.process_youtube_url, job_id, url, user_id)
+
+        return {"job_id": job_id, "message": "Khan Academy download started. Transcription will follow."}
+
+    except Exception as e:
+        job_manager.set_job_error(job_id, str(e))
+        logger.error(f"Khan Academy download failed: {e}")
+        raise HTTPException(status_code=500, detail="We're having trouble downloading this Khan Academy video. Please check the URL and try again.")
+
 # Udemy course URL endpoint
 @app.post("/process-udemy-url/")
 async def process_udemy_url(
@@ -1542,6 +1597,134 @@ async def examples_phrase_endpoint(req: ExplainRequest):
 
 # Translation endpoints (supports UI fallbacks: JSON POST, GET with query, form-encoded; multiple route names)
 from fastapi import Body
+
+# Style rewrite endpoints (supports JSON POST, GET with query, and form-encoded)
+async def _parse_style_params(request: Request) -> dict:
+    """Parse style rewrite parameters from JSON, form or query with flexible aliases."""
+    data = {}
+    form = None
+    try:
+        data = await request.json()
+        if not isinstance(data, dict):
+            data = {}
+    except Exception:
+        data = {}
+    try:
+        form = await request.form()
+    except Exception:
+        form = None
+    query = dict(request.query_params or {})
+
+    def pick(*keys, default=None):
+        for k in keys:
+            if k in data and data[k] not in (None, ""):
+                return data[k]
+            if form is not None and k in form and form[k] not in (None, ""):
+                return form.get(k)
+            if k in query and query[k] not in (None, ""):
+                return query.get(k)
+        return default
+
+    text = pick('text', 'phrase', 'selection', default="")
+    style_raw = pick('style', 'tone', 'target_style', default='lecture_notes')
+    model_id = pick('model_id', 'model', default=os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'))
+
+    # Normalize style
+    style_map = {
+        'lecture_notes': 'lecture_notes',
+        'lecture': 'lecture_notes',
+        'notes': 'lecture_notes',
+        'cheat_sheet': 'cheat_sheet',
+        'cheatsheet': 'cheat_sheet',
+        'cheat': 'cheat_sheet',
+        'exam_answer': 'exam_answer',
+        'exam': 'exam_answer',
+        'answer': 'exam_answer',
+    }
+    style = style_map.get(str(style_raw or '').strip().lower(), 'lecture_notes')
+
+    return {
+        'text': str(text or "").strip(),
+        'style': style,
+        'model_id': model_id,
+    }
+
+async def _style_rewrite_with_groq(text: str, style: str, model_id: str) -> dict:
+    """Use Groq LLM to rewrite text into the requested style and return compact Markdown."""
+    if not text:
+        raise HTTPException(status_code=400, detail="Text is required")
+
+    if not groq_generator.is_available():
+        # Fallback: echo text in minimal wrapper
+        return {
+            'success': True,
+            'style': style,
+            'content': text,
+        }
+
+    # Style-specific instructions
+    style_instructions = {
+        'lecture_notes': (
+            "Rewrite the input as compact lecture notes with clear headings and sub-bullets. "
+            "Use concise phrasing, keep sections short, and avoid fluff. Output Markdown only."
+        ),
+        'cheat_sheet': (
+            "Rewrite the input as a one-page cheat sheet. Use bullet points, short formulas, and key takeaways. "
+            "Highlight critical terms with bold. Avoid long paragraphs. Output Markdown only."
+        ),
+        'exam_answer': (
+            "Rewrite the input as a structured exam answer with brief intro, key arguments, and short conclusion. "
+            "Be precise, avoid informal language, and keep it concise. Output Markdown only."
+        ),
+    }
+
+    instruction = style_instructions.get(style, style_instructions['lecture_notes'])
+
+    # Clamp text size to prevent excessive prompt
+    max_len = 5000
+    src = text if len(text) <= max_len else text[:max_len]
+
+    prompt = (
+        f"{instruction}\n\n"
+        f"Input text (verbatim, do not echo at the end):\n" + src
+    )
+
+    try:
+        response = groq_generator.client.chat.completions.create(
+            model=model_id or os.getenv('GROQ_MODEL', 'llama-3.1-8b-instant'),
+            messages=[
+                {"role": "system", "content": "You transform text to requested academic styles and output clean Markdown only."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+            max_tokens=900,
+            top_p=0.9
+        )
+        content = (response.choices[0].message.content or '').strip()
+        return { 'success': True, 'style': style, 'content': content }
+    except Exception as e:
+        logger.error(f"Style rewrite error via Groq: {e}")
+        # Soft fallback: return original text
+        return { 'success': True, 'style': style, 'content': text }
+
+async def _handle_style(request: Request):
+    params = await _parse_style_params(request)
+    text = params['text']
+    style = params['style']
+    model_id = params['model_id']
+
+    result = await _style_rewrite_with_groq(text, style, model_id)
+    return JSONResponse(status_code=200, content=result)
+
+# Primary endpoint (preferred by UI)
+@app.api_route("/api/rewrite-style", methods=["GET", "POST"])
+async def rewrite_style_endpoint(request: Request):
+    return await _handle_style(request)
+
+# Alternate names the UI may try
+@app.api_route("/api/style-rewrite", methods=["GET", "POST"])
+async def rewrite_style_alias_endpoint(request: Request):
+    return await _handle_style(request)
 
 async def _parse_translate_params(request: Request) -> dict:
     """Parse translate parameters from JSON, form or query with flexible aliases."""

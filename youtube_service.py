@@ -41,6 +41,11 @@ class YouTubeService:
         return 'udemy.com' in url.lower()
     
     @staticmethod
+    def is_khanacademy_url(url: str) -> bool:
+        """Check if URL is a Khan Academy video URL"""
+        return 'khanacademy.org' in url.lower()
+    
+    @staticmethod
     def download_video(url: str, output_path: str, cookies_path: str | None = None) -> str:
         """
         Download video from YouTube URL
@@ -58,6 +63,7 @@ class YouTubeService:
         # Adjust configuration based on URL type
         is_ted = YouTubeService.is_ted_url(url)
         is_udemy = YouTubeService.is_udemy_url(url)
+        is_khan = YouTubeService.is_khanacademy_url(url)
         
         # Determine platform-specific settings
         if is_udemy:
@@ -69,6 +75,12 @@ class YouTubeService:
         elif is_ted:
             platform = 'TED'
             referer = 'https://www.ted.com/'
+            sleep_interval = 2
+            max_sleep_interval = 8
+            retries = 5
+        elif is_khan:
+            platform = 'Khan Academy'
+            referer = 'https://www.khanacademy.org/'
             sleep_interval = 2
             max_sleep_interval = 8
             retries = 5
@@ -154,25 +166,27 @@ class YouTubeService:
         Fallback download method with different configurations
         """
         is_ted = YouTubeService.is_ted_url(url)
+        is_khan = YouTubeService.is_khanacademy_url(url)
         
-        if is_ted:
-            # TED-specific fallback configurations
+        if is_ted or is_khan:
+            # Educational site-specific fallback configurations (TED/Khan Academy)
+            ref = 'https://www.ted.com/' if is_ted else 'https://www.khanacademy.org/'
             fallback_configs = [
-                # Try with TED's preferred format
+                # Try with a conservative video format
                 {
                     'format': 'best[height<=480]/best',
                     'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
                     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'referer': 'https://www.ted.com/',
+                    'referer': ref,
                     'sleep_interval': 3,
                     'retries': 3,
                 },
-                # Try with audio-only for TED
+                # Try with audio-only
                 {
                     'format': 'bestaudio/best',
                     'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
                     'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-                    'referer': 'https://www.ted.com/',
+                    'referer': ref,
                     'sleep_interval': 5,
                     'retries': 2,
                 },
