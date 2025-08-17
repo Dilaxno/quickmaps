@@ -7,6 +7,7 @@ Deepgram-only transcription (model: whisper-large by default).
 import json
 import logging
 import time
+import os
 from typing import Dict, Any
 
 from config import (
@@ -22,6 +23,15 @@ class TranscriptionService:
 
     def __init__(self):
         self.use_deepgram = USE_DEEPGRAM and bool(DEEPGRAM_API_KEY)
+        # Configure generous timeouts, especially for whisper-large
+        try:
+            self.deepgram_timeout = int(os.getenv("DEEPGRAM_TIMEOUT_SECONDS", "900"))  # total read/write timeout
+        except Exception:
+            self.deepgram_timeout = 900
+        try:
+            self.deepgram_connect_timeout = int(os.getenv("DEEPGRAM_CONNECT_TIMEOUT_SECONDS", "60"))
+        except Exception:
+            self.deepgram_connect_timeout = 60
         if not self.use_deepgram:
             logger.warning("Deepgram not configured. Set USE_DEEPGRAM=true and provide DEEPGRAM_API_KEY.")
     
@@ -105,10 +115,15 @@ class TranscriptionService:
                 'diarize': 'false'
             }
             
-            logger.info(f"📡 Making HTTP request to Deepgram API (Content-Type: {content_type})")
+            logger.info(f"📡 Making HTTP request to Deepgram API (Content-Type: {content_type}) with timeouts: connect={self.deepgram_connect_timeout}s, read/write/pool={self.deepgram_timeout}s")
             
-            # Use longer timeout for HTTP request
-            timeout = httpx.Timeout(300.0)  # 5 minutes
+            # Use longer, configurable timeouts for HTTP request
+            timeout = httpx.Timeout(
+                connect=self.deepgram_connect_timeout,
+                read=self.deepgram_timeout,
+                write=self.deepgram_timeout,
+                pool=self.deepgram_timeout,
+            )
             
             with httpx.Client(timeout=timeout) as client:
                 response = client.post(
@@ -182,7 +197,7 @@ class TranscriptionService:
             payload = {"buffer": buffer_data}
             
             # Try transcription with retry logic
-            max_retries = 3
+            max_retries = 5
             retry_count = 0
             response = None
             
@@ -194,8 +209,10 @@ class TranscriptionService:
                 except Exception as retry_error:
                     retry_count += 1
                     if "timeout" in str(retry_error).lower() and retry_count < max_retries:
-                        logger.warning(f"⚠️ Timeout on attempt {retry_count}/{max_retries}, retrying...")
-                        time.sleep(2)  # Wait before retry
+                        # Exponential backoff capped at 30s
+                        delay = min(2 ** retry_count, 30)
+                        logger.warning(f"⚠️ Timeout on attempt {retry_count}/{max_retries}, retrying in {delay}s...")
+                        time.sleep(delay)
                         continue
                     else:
                         raise retry_error
