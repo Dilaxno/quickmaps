@@ -4987,37 +4987,13 @@ async def verify_email_otp(req: VerifyOtpRequest):
     """OTP disabled: treat as verified for backward compatibility"""
     return {"message": "Email verified", "success": True}
 
-@app.get("/verify-email")
-# Email verification OTP endpoints
-from email_verification_service import email_verification_service
-
-class SendOtpRequest(BaseModel):
-    email: str
-
-class VerifyOtpRequest(BaseModel):
-    email: str
-    otp: str
-
-@app.post("/api/auth/send-email-otp")
-async def send_email_otp(req: SendOtpRequest):
-    """OTP disabled: respond with success to avoid blocking legacy clients"""
-    return {"message": "OTP disabled", "success": True}
-
-@app.post("/api/auth/verify-email-otp")
-async def verify_email_otp(req: VerifyOtpRequest):
-    """OTP disabled: treat as verified for backward compatibility"""
-    return {"message": "Email verified", "success": True}
 
 @app.get("/verify-email")
 async def verify_email_via_url(email: str, code: str):
     """OTP disabled: always redirect to dashboard as verified"""
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url=f"{os.getenv('FRONTEND_URL', 'https://quickmaps.pro')}")
-    return RedirectResponse(
-        url="https://quickmaps.pro/dashboard?verified=true",
-        status_code=302
-    )
-
+    
 # User Statistics endpoints
 @app.get("/api/user-statistics/{user_id}")
 async def get_user_statistics(user_id: str, request: Request = None):
