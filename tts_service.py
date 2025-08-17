@@ -334,7 +334,8 @@ class TTSService:
                 "sample_rate": 22050,  # pyttsx3 default
                 "file_size": file_size,
                 "text_length": len(text),
-                "backend": "pyttsx3"
+                "backend": "pyttsx3",
+                "mime_type": "audio/wav",
             }
             
         except Exception as e:
@@ -365,7 +366,8 @@ class TTSService:
                 "sample_rate": 24000,  # gTTS typical
                 "file_size": file_size,
                 "text_length": len(text),
-                "backend": "gtts"
+                "backend": "gtts",
+                "mime_type": "audio/mpeg",
             }
             
         except Exception as e:
@@ -455,7 +457,8 @@ class TTSService:
                 "text_length": len(text),
                 "backend": "deepgram_aura1",
                 "voice": self.voice,
-                "chunks": 1
+                "chunks": 1,
+                "mime_type": "audio/wav",
             }
 
     def _generate_chunked_deepgram_audio(self, text: str, output_path: str, max_chunk_size: int) -> Dict[str, Any]:
@@ -507,7 +510,8 @@ class TTSService:
                 "text_length": len(text),
                 "backend": "deepgram_aura1",
                 "voice": self.voice,
-                "chunks": len(chunks)
+                "chunks": len(chunks),
+                "mime_type": "audio/wav",
             }
             
         finally:
@@ -621,9 +625,10 @@ class TTSService:
             # Ensure output directory exists
             Path(output_dir).mkdir(parents=True, exist_ok=True)
             
-            # Generate unique filename
+            # Generate unique filename based on backend/container
             audio_id = str(uuid.uuid4())
-            output_path = os.path.join(output_dir, f"tts_{audio_id}.wav")
+            ext = 'mp3' if self.backend == 'gtts' else 'wav'
+            output_path = os.path.join(output_dir, f"tts_{audio_id}.{ext}")
             
             # Run TTS generation in executor to avoid blocking
             loop = asyncio.get_event_loop()
@@ -652,8 +657,9 @@ class TTSService:
             # Clean up notes content for better TTS
             cleaned_text = self._clean_text_for_tts(notes_content)
             
-            # Generate filename based on job_id
-            output_path = os.path.join(output_dir, f"{job_id}_notes_audio.wav")
+            # Generate filename based on job_id and backend
+            ext = 'mp3' if self.backend == 'gtts' else 'wav'
+            output_path = os.path.join(output_dir, f"{job_id}_notes_audio.{ext}")
             
             # Run TTS generation
             loop = asyncio.get_event_loop()
