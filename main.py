@@ -424,6 +424,15 @@ async def options_handler(path: str):
     """Handle preflight OPTIONS requests"""
     return {"message": "OK"}
 
+# Explicit preflight handlers for common upload endpoints (some proxies require concrete routes)
+@app.options("/upload-audio")
+async def options_upload_audio_no_slash():
+    return Response(status_code=204)
+
+@app.options("/upload-audio/")
+async def options_upload_audio_slash():
+    return Response(status_code=204)
+
 # Basic endpoints
 @app.get("/")
 async def root():
