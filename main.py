@@ -398,6 +398,54 @@ logger.info(f"🌐 CORS configured with origins: {allowed_origins}")
 logger.info(f"🌐 CORS methods: {CORS_METHODS}")
 logger.info(f"🌐 CORS headers: {CORS_HEADERS}")
 
+# Force CORS headers on all responses (including errors) and handle generic preflight
+@app.middleware("http")
+async def force_cors_headers(request: Request, call_next):
+    # Short-circuit preflight if it reaches here
+    if request.method == "OPTIONS":
+        # Mirror requested headers if provided
+        acrh = request.headers.get("Access-Control-Request-Headers", "Authorization,Content-Type,Accept,X-Requested-With")
+        origin = request.headers.get("origin")
+        # Choose allowed origin
+        if origin in allowed_origins:
+            allow_origin = origin
+        else:
+            allow_origin = allowed_origins[0] if allowed_origins else "*"
+        return Response(
+            status_code=204,
+            headers={
+                "Access-Control-Allow-Origin": allow_origin,
+                "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS",
+                "Access-Control-Allow-Headers": acrh,
+                "Access-Control-Allow-Credentials": "true",
+                "Vary": "Origin",
+            }
+        )
+
+    # Proceed with normal handling
+    response = await call_next(request)
+    try:
+        origin = request.headers.get("origin")
+        if origin in allowed_origins:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            # Preserve exposed headers
+            if "Content-Disposition" not in response.headers.get("Access-Control-Expose-Headers", ""):
+                response.headers["Access-Control-Expose-Headers"] = (
+                    (response.headers.get("Access-Control-Expose-Headers", "") + ",Content-Disposition").strip(",")
+                )
+            response.headers["Vary"] = "Origin"
+        else:
+            # Fallback to first allowed if origin missing/unexpected
+            if allowed_origins:
+                response.headers.setdefault("Access-Control-Allow-Origin", allowed_origins[0])
+                response.headers.setdefault("Access-Control-Allow-Credentials", "true")
+                response.headers.setdefault("Vary", "Origin")
+    except Exception:
+        # Ensure at least some CORS headers in worst-case scenarios
+        response.headers.setdefault("Access-Control-Allow-Origin", "*")
+    return response
+
 # Capture ?ref=... and set cookie
 app.add_middleware(AffiliateAttributionMiddleware)
 
