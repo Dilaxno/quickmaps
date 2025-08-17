@@ -92,7 +92,7 @@ class AffiliateService:
                 data = snapshot.to_dict() or {}
                 totals = data.get('totals') or {}
                 revenue = float(totals.get('revenue', 0)) + float(amount_cents)
-                commission = revenue * 0.30
+                commission = revenue * 0.35
                 currency_u = (totals.get('currency') or currency or 'USD').upper()
 
                 # referralsCount increment if first payment from this user
