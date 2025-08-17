@@ -32,6 +32,20 @@ class TranscriptionService:
             self.deepgram_connect_timeout = int(os.getenv("DEEPGRAM_CONNECT_TIMEOUT_SECONDS", "180"))
         except Exception:
             self.deepgram_connect_timeout = 60
+
+        # Chunking configuration for long audio
+        try:
+            self.chunk_threshold_seconds = int(os.getenv("DEEPGRAM_CHUNK_THRESHOLD_SECONDS", "2400"))  # 40 min
+        except Exception:
+            self.chunk_threshold_seconds = 2400
+        try:
+            self.chunk_seconds = int(os.getenv("DEEPGRAM_CHUNK_SECONDS", "600"))  # 10 min per chunk
+        except Exception:
+            self.chunk_seconds = 600
+        try:
+            self.chunk_size_bytes_threshold = int(os.getenv("DEEPGRAM_CHUNK_SIZE_BYTES_THRESHOLD", str(150 * 1024 * 1024)))
+        except Exception:
+            self.chunk_size_bytes_threshold = 150 * 1024 * 1024
         if not self.use_deepgram:
             logger.warning("Deepgram not configured. Set USE_DEEPGRAM=true and provide DEEPGRAM_API_KEY.")
     
@@ -295,20 +309,127 @@ class TranscriptionService:
             
             raise Exception(f"Deepgram transcription failed: {e}")
 
-    def transcribe_audio(self, audio_path: str) -> Dict[str, Any]:
-        """Transcribe audio using Deepgram with fallback"""
-        if not self.use_deepgram:
-            raise Exception("Deepgram is not configured. Set USE_DEEPGRAM=true and provide DEEPGRAM_API_KEY in .env")
-        
+    # Helper: get audio duration in seconds using pydub or ffprobe
+    def _get_audio_duration_seconds(self, audio_path: str):
+        try:
+            from pydub import AudioSegment
+            audio = AudioSegment.from_file(audio_path)
+            return len(audio) / 1000.0
+        except Exception:
+            pass
+        try:
+            import subprocess
+            cmd = [
+                "ffprobe", "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=nokey=1:noprint_wrappers=1",
+                audio_path,
+            ]
+            out = subprocess.check_output(cmd, stderr=subprocess.STDOUT)
+            dur = float(out.decode("utf-8", errors="ignore").strip())
+            return dur if dur > 0 else None
+        except Exception as e:
+            logger.warning(f"Could not determine duration: {e}")
+            return None
+
+    # Helper: split audio into WAV chunks for robust decoding
+    def _split_audio_to_chunks(self, audio_path: str, chunk_seconds: int):
+        import tempfile, subprocess, shutil
+        from pathlib import Path
+        tmpdir = tempfile.mkdtemp(prefix="dg_chunks_")
+        pattern = str(Path(tmpdir) / "chunk_%04d.wav")
+        try:
+            cmd = [
+                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+                "-i", audio_path,
+                "-f", "segment", "-segment_time", str(chunk_seconds),
+                "-ac", "1", "-ar", "16000",
+                pattern,
+            ]
+            subprocess.check_call(cmd)
+            files = sorted([str(p) for p in Path(tmpdir).glob("chunk_*.wav")])
+            if not files:
+                raise Exception("No chunks created by ffmpeg.")
+            return files, tmpdir
+        except Exception as e:
+            logger.error(f"Chunking failed: {e}")
+            shutil.rmtree(tmpdir, ignore_errors=True)
+            raise
+
+    # Helper: single-file transcription with SDK + HTTP fallback
+    def _transcribe_single(self, audio_path: str) -> Dict[str, Any]:
         try:
             return self._transcribe_with_deepgram(audio_path)
         except Exception as e:
-            # If SDK fails, try HTTP fallback
             if "timeout" in str(e).lower() or "PrerecordedResponse" in str(e):
                 logger.warning(f"⚠️ SDK method failed ({e}), trying HTTP fallback...")
                 return self._transcribe_with_deepgram_http(audio_path)
-            else:
-                raise e
+            raise
+
+    # Chunked transcription orchestrator
+    def _transcribe_audio_chunked(self, audio_path: str, chunk_seconds: int) -> Dict[str, Any]:
+        import shutil
+        from pathlib import Path
+        chunk_paths, tmpdir = self._split_audio_to_chunks(audio_path, chunk_seconds)
+        try:
+            combined_text = []
+            combined_segments = []
+            language = "en"
+            total = len(chunk_paths)
+            for idx, chunk_path in enumerate(chunk_paths):
+                logger.info(f"🎧 Transcribing chunk {idx+1}/{total}: {chunk_path}")
+                offset = idx * float(chunk_seconds)
+                result = self._transcribe_single(chunk_path)
+                combined_text.append(result.get("text", "") or "")
+                lang = result.get("language") or language
+                language = lang or language
+                segs = result.get("segments") or []
+                for s in segs:
+                    try:
+                        start = float(s.get("start", 0)) + offset
+                        end = float(s.get("end", 0)) + offset
+                        text = s.get("text", "")
+                    except Exception:
+                        start = float(getattr(s, "start", 0) or 0) + offset
+                        end = float(getattr(s, "end", 0) or 0) + offset
+                        text = getattr(s, "text", "") or ""
+                    combined_segments.append({"start": start, "end": end, "text": text})
+            return {"text": "\n\n".join(t for t in combined_text if t).strip(), "segments": combined_segments, "language": language}
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+    def transcribe_audio(self, audio_path: str) -> Dict[str, Any]:
+        """Transcribe audio using Deepgram with chunking for long audio"""
+        if not self.use_deepgram:
+            raise Exception("Deepgram is not configured. Set USE_DEEPGRAM=true and provide DEEPGRAM_API_KEY in .env")
+        
+        # Decide whether to chunk based on duration or size
+        try:
+            duration = self._get_audio_duration_seconds(audio_path)
+        except Exception:
+            duration = None
+        try:
+            size_bytes = os.path.getsize(audio_path)
+        except Exception:
+            size_bytes = 0
+
+        should_chunk = False
+        if duration is not None and duration >= float(getattr(self, "chunk_threshold_seconds", 2400)):
+            should_chunk = True
+            logger.info(f"⏱️ Long audio detected ({duration/60:.1f} min) >= threshold, using chunked transcription.")
+        elif duration is None and size_bytes >= int(getattr(self, "chunk_size_bytes_threshold", 150*1024*1024)):
+            should_chunk = True
+            logger.info(f"💾 Large file size detected ({size_bytes/1024/1024:.1f} MB) and unknown duration; using chunked transcription.")
+
+        if should_chunk:
+            try:
+                return self._transcribe_audio_chunked(audio_path, int(getattr(self, "chunk_seconds", 600)))
+            except Exception as e:
+                logger.error(f"❌ Chunked transcription failed: {e}; falling back to single-file transcription.")
+                return self._transcribe_single(audio_path)
+
+        # Default single-file path
+        return self._transcribe_single(audio_path)
 
     def is_available(self) -> bool:
         """Check if the transcription service is available"""
