@@ -81,11 +81,14 @@ class CreditService:
             # Refresh monthly credits for free plan if needed
             current_credits = await self._maybe_refresh_free_monthly_credits(user_ref, user_data)
             
-            # Handle backward compatibility - check for both 'credits' and 'current_credits' fields
-            if current_credits == 0 and 'credits' in user_data:
-                # Use the 'credits' field if 'current_credits' is 0 or missing
+            # Backward compatibility: only fallback if 'current_credits' field is missing
+            if 'current_credits' not in user_data and 'credits' in user_data:
                 current_credits = user_data.get('credits', 0)
-                logger.info(f"🔄 Using legacy 'credits' field for check, user {user_id}: {current_credits}")
+                try:
+                    user_ref.update({'current_credits': current_credits})
+                except Exception:
+                    pass
+                logger.info(f"🔄 Migrated legacy 'credits' field for check, user {user_id}: {current_credits}")
             
             # Check if user has enough credits
             if current_credits < credits_needed:
@@ -141,12 +144,15 @@ class CreditService:
             # Refresh monthly credits for free plan if needed
             current_credits = await self._maybe_refresh_free_monthly_credits(user_ref, user_data)
             using_legacy_field = False
-            # Handle backward compatibility - check for both 'credits' and 'current_credits' fields
-            if current_credits == 0 and 'credits' in user_data:
-                # Use the 'credits' field if 'current_credits' is 0 or missing
+            # Backward compatibility: only fallback if 'current_credits' field is missing
+            if 'current_credits' not in user_data and 'credits' in user_data:
                 current_credits = user_data.get('credits', 0)
                 using_legacy_field = True
-                logger.info(f"🔄 Using legacy 'credits' field for deduction, user {user_id}: {current_credits}")
+                try:
+                    user_ref.update({'current_credits': current_credits})
+                except Exception:
+                    pass
+                logger.info(f"🔄 Migrated legacy 'credits' field for deduction, user {user_id}: {current_credits}")
             
             # Check if user has enough credits
             if current_credits < credits_needed:
@@ -164,14 +170,13 @@ class CreditService:
             # Update user document - update both fields to standardize
             update_data = {
                 'current_credits': new_credits,
+                'credits': new_credits,  # Keep legacy field updated for compatibility
                 'credits_used': credits_used,
                 'last_activity': datetime.now(),
                 'last_action': action.value
             }
             
-            # If using legacy field, also update the legacy field and migrate to new field
             if using_legacy_field:
-                update_data['credits'] = new_credits  # Keep legacy field updated
                 logger.info(f"🔄 Migrating user {user_id} to standardized credit fields")
             
             user_ref.update(update_data)
@@ -212,10 +217,13 @@ class CreditService:
                 'user_id': user_id,
                 'plan': 'free',
                 'current_credits': 30,  # Free monthly credits
+                'credits': 30,  # Legacy field for backward compatibility
                 'credits_used': 0,
                 'total_mindmaps': 0,
                 'created_at': datetime.now(),
                 'last_activity': datetime.now(),
+                'lastCreditUpdate': datetime.now(),  # Anchor first cycle at signup time
+                'free_credits_cycle_start': datetime.now(),
                 'account_status': 'active'
             }
             
@@ -260,14 +268,41 @@ class CreditService:
             logger.error(f"❌ Error logging credit usage: {e}")
     
     async def _maybe_refresh_free_monthly_credits(self, user_ref, user_data) -> int:
-        """Refresh monthly credits for free plan users if 30 days have passed. Returns current credits after refresh."""
+        """Refresh monthly credits for free plan users if 30 days have passed. Returns current credits after refresh.
+        This function anchors the refresh schedule to the signup date to avoid immediate refills.
+        """
         try:
             plan = str(user_data.get('plan', user_data.get('currentPlan', 'free'))).lower()
             if plan != 'free':
                 # Only refresh for free plan
                 return user_data.get('current_credits', user_data.get('credits', 0))
-            last_update = user_data.get('lastCreditUpdate') or user_data.get('last_credit_update') or user_data.get('created_at')
+
             now = datetime.now()
+
+            # Establish an anchor for the free credits cycle
+            anchor = (
+                user_data.get('free_credits_cycle_start')
+                or user_data.get('created_at')
+                or user_data.get('lastCreditUpdate')
+            )
+
+            anchor_dt = None
+            if isinstance(anchor, datetime):
+                anchor_dt = anchor
+            else:
+                try:
+                    if anchor:
+                        anchor_dt = datetime.fromisoformat(str(anchor))
+                except Exception:
+                    anchor_dt = None
+
+            # If no anchor could be determined, set it now and return without refreshing
+            if anchor_dt is None:
+                user_ref.update({'free_credits_cycle_start': now, 'lastCreditUpdate': now})
+                return user_data.get('current_credits', user_data.get('credits', 0))
+
+            # Determine the last refresh time (fallback to anchor if missing)
+            last_update = user_data.get('lastCreditUpdate') or user_data.get('last_credit_update') or anchor_dt
             last_dt = None
             if isinstance(last_update, datetime):
                 last_dt = last_update
@@ -276,15 +311,19 @@ class CreditService:
                     if last_update:
                         last_dt = datetime.fromisoformat(str(last_update))
                 except Exception:
-                    last_dt = None
-            if last_dt is None:
-                # Force refresh if we can't determine last update
-                last_dt = now - timedelta(days=31)
+                    last_dt = anchor_dt
+
+            # Guard against last_dt being earlier than anchor
+            if last_dt < anchor_dt:
+                last_dt = anchor_dt
+
+            # Only refresh if 30 full days have elapsed since last refresh (or signup for first cycle)
             if (now - last_dt) >= timedelta(days=30):
                 new_credits = 30
-                user_ref.update({'current_credits': new_credits, 'lastCreditUpdate': now})
+                user_ref.update({'current_credits': new_credits, 'lastCreditUpdate': now, 'free_credits_cycle_start': anchor_dt})
                 logger.info(f"♻️ Refreshed monthly free credits to {new_credits} for user {user_ref.id}")
                 return new_credits
+
             return user_data.get('current_credits', user_data.get('credits', 0))
         except Exception as e:
             logger.warning(f"⚠️ Failed to refresh monthly credits: {e}")
@@ -318,7 +357,21 @@ class CreditService:
             # Send via Resend
             try:
                 from resend_service import resend_service
-                sent = await resend_service.send_low_credit_warning(email, name, new_credits, plan)
+                # Compute next refill date for free plan users to include in the email
+                next_refill_date = None
+                if plan == 'free':
+                    anchor = user_data.get('free_credits_cycle_start') or user_data.get('created_at')
+                    anchor_dt = anchor if isinstance(anchor, datetime) else None
+                    if not anchor_dt and anchor:
+                        try:
+                            anchor_dt = datetime.fromisoformat(str(anchor))
+                        except Exception:
+                            anchor_dt = None
+                    if anchor_dt:
+                        from datetime import timedelta
+                        cycles = max(1, int(((datetime.now() - anchor_dt).days // 30) + 1))
+                        next_refill_date = anchor_dt + timedelta(days=30 * cycles)
+                sent = await resend_service.send_low_credit_warning(email, name, new_credits, plan, next_refill_date=next_refill_date)
                 if sent:
                     user_ref.update({'lastLowCreditEmail': datetime.now()})
             except Exception as e:
@@ -344,11 +397,14 @@ class CreditService:
             # Refresh monthly credits for free plan if needed
             current_credits = await self._maybe_refresh_free_monthly_credits(user_ref, user_data)
             
-            # Handle backward compatibility - check for both 'credits' and 'current_credits' fields
-            if current_credits == 0 and 'credits' in user_data:
-                # Use the 'credits' field if 'current_credits' is 0 or missing
+            # Backward compatibility: only fallback if 'current_credits' field is missing
+            if 'current_credits' not in user_data and 'credits' in user_data:
                 current_credits = user_data.get('credits', 0)
-                logger.info(f"🔄 Using legacy 'credits' field for user {user_id}: {current_credits}")
+                try:
+                    user_ref.update({'current_credits': current_credits})
+                except Exception:
+                    pass
+                logger.info(f"🔄 Migrated legacy 'credits' field for user {user_id}: {current_credits}")
             
             return {
                 'current_credits': current_credits,
@@ -376,26 +432,28 @@ class CreditService:
             
             user_data = user_doc.to_dict()
             
-            # Handle backward compatibility - check for both 'credits' and 'current_credits' fields
-            current_credits = user_data.get('current_credits', 0)
             using_legacy_field = False
-            if current_credits == 0 and 'credits' in user_data:
-                # Use the 'credits' field if 'current_credits' is 0 or missing
+            if 'current_credits' not in user_data and 'credits' in user_data:
                 current_credits = user_data.get('credits', 0)
                 using_legacy_field = True
-                logger.info(f"🔄 Using legacy 'credits' field for addition, user {user_id}: {current_credits}")
+                try:
+                    user_ref.update({'current_credits': current_credits})
+                except Exception:
+                    pass
+                logger.info(f"🔄 Migrated legacy 'credits' field for addition, user {user_id}: {current_credits}")
+            else:
+                current_credits = user_data.get('current_credits', 0)
             
             new_credits = current_credits + credits_to_add
             
             # Update user document - update both fields to standardize
             update_data = {
                 'current_credits': new_credits,
+                'credits': new_credits,  # Keep legacy field updated for compatibility
                 'last_activity': datetime.now()
             }
             
-            # If using legacy field, also update the legacy field and migrate to new field
             if using_legacy_field:
-                update_data['credits'] = new_credits  # Keep legacy field updated
                 logger.info(f"🔄 Migrating user {user_id} to standardized credit fields during addition")
             
             user_ref.update(update_data)

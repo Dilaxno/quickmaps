@@ -692,8 +692,10 @@ The {self.from_name} Team
             return False
 
     
-    async def send_low_credit_warning(self, email: str, user_name: str = None, current_credits: int = 0, plan: str = 'free') -> bool:
-        """Send a low credit balance warning email via Resend with an upgrade button."""
+    async def send_low_credit_warning(self, email: str, user_name: str = None, current_credits: int = 0, plan: str = 'free', next_refill_date: datetime | None = None) -> bool:
+        """Send a low credit balance warning email via Resend with an upgrade button.
+        If plan is free, include the next refill date if provided.
+        """
         if not self.is_configured():
             logger.error("Resend service is not configured")
             return False
@@ -701,6 +703,16 @@ The {self.from_name} Team
             name = user_name or (email.split('@')[0].title() if email else "there")
             upgrade_url = f"{self.frontend_url}/pricing?ref=low-credits"
             subject = f"Low credits: {current_credits} remaining — upgrade to keep generating"
+
+            refill_html = ""
+            refill_text = ""
+            if plan == 'free' and next_refill_date:
+                try:
+                    readable = next_refill_date.strftime('%b %d, %Y')
+                except Exception:
+                    readable = str(next_refill_date)
+                refill_html = f"<p style=\"margin-top:8px;color:#6b7280;font-size:13px\">Free plan credits refill on <strong>{readable}</strong> (30 days from signup or last refill).</p>"
+                refill_text = f"\nNext free-plan refill: {readable} (30 days from signup or last refill).\n"
 
             html_content = f"""
             <!DOCTYPE html>
@@ -737,6 +749,7 @@ The {self.from_name} Team
                   <div class="stat">Remaining credits: {current_credits}</div>
                   <div class="message">
                     <p>To avoid interruptions, upgrade your plan and continue generating notes and diagrams without downtime.</p>
+                    {refill_html}
                   </div>
                   <div class="button-wrap">
                     <a href="{upgrade_url}" class="button">Upgrade plan</a>
@@ -760,7 +773,7 @@ Hi {name},
 
 Your credit balance is running low.
 Remaining credits: {current_credits}
-
+{refill_text}
 Upgrade to avoid interruptions:
 {upgrade_url}
 
