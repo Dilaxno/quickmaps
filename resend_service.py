@@ -691,5 +691,100 @@ The {self.from_name} Team
             logger.error(f"Failed to send welcome email via Resend to {email}: {e}")
             return False
 
+    async def send_low_credit_warning(self, email: str, user_name: str = None, current_credits: int = 0, plan: str = 'free') -> bool:
+        """Send a low credit balance warning email via Resend with an upgrade button."""
+        if not self.is_configured():
+            logger.error("Resend service is not configured")
+            return False
+        try:
+            name = user_name or (email.split('@')[0].title() if email else "there")
+            upgrade_url = f"{self.frontend_url}/pricing?ref=low-credits"
+            subject = f"Low credits: {current_credits} remaining — upgrade to keep generating"
+
+            html_content = f"""
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+              <meta charset="UTF-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+              <title>Low Credits Warning</title>
+              <style>
+                body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#f6f7fb; margin:0; padding:20px; color:#111827; }}
+                .container {{ max-width:600px; margin:0 auto; background:#ffffff; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.08); overflow:hidden; }}
+                .header {{ background:linear-gradient(135deg,#090040 0%, #4c1d95 100%); color:#fff; padding:28px 24px; text-align:center; }}
+                .brand {{ font-weight:700; font-size:22px; letter-spacing:-0.2px; }}
+                .content {{ padding:28px 24px; }}
+                .greeting {{ font-size:18px; font-weight:600; margin:0 0 12px; }}
+                .message {{ font-size:15px; line-height:1.7; color:#374151; }}
+                .stat {{ background:#f3f4f6; border:1px solid #e5e7eb; border-radius:12px; padding:14px 16px; margin:16px 0; text-align:center; font-weight:600; color:#111827; }}
+                .button-wrap {{ text-align:center; margin:24px 0 8px; }}
+                .button {{ display:inline-block; text-decoration:none; background:#090040; color:#fff !important; padding:14px 22px; border-radius:10px; font-weight:700; box-shadow:0 6px 20px rgba(9,0,64,0.3); }}
+                .footer {{ padding:18px 24px; font-size:12px; color:#6b7280; text-align:center; background:#f9fafb; border-top:1px solid #e5e7eb; }}
+              </style>
+            </head>
+            <body>
+              <div class="container">
+                <div class="header">
+                  <div class="brand">{self.from_name}</div>
+                  <div style="opacity:.85; font-size:14px;">Credit balance reminder</div>
+                </div>
+                <div class="content">
+                  <p class="greeting">Hi {name},</p>
+                  <div class="message">
+                    <p>Your current credit balance is running low.</p>
+                  </div>
+                  <div class="stat">Remaining credits: {current_credits}</div>
+                  <div class="message">
+                    <p>To avoid interruptions, upgrade your plan and continue generating notes and diagrams without downtime.</p>
+                  </div>
+                  <div class="button-wrap">
+                    <a href="{upgrade_url}" class="button">Upgrade plan</a>
+                  </div>
+                  <div class="message" style="text-align:center; font-size:12px; color:#6b7280; margin-top:10px;">
+                    or visit {self.frontend_url}/pricing
+                  </div>
+                </div>
+                <div class="footer">
+                  © {datetime.now().year} {self.from_name}. All rights reserved.
+                </div>
+              </div>
+            </body>
+            </html>
+            """
+
+            text_content = f"""
+{self.from_name} — Low credits warning
+
+Hi {name},
+
+Your credit balance is running low.
+Remaining credits: {current_credits}
+
+Upgrade to avoid interruptions:
+{upgrade_url}
+
+— {self.from_name}
+            """
+
+            payload = {
+                "from": f"{self.from_name} <{self.from_email}>",
+                "to": [email],
+                "subject": subject,
+                "html": html_content,
+                "text": text_content,
+                "tags": [{"name": "category", "value": "low_credits"}],
+            }
+
+            headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+            response = requests.post(self.api_url, json=payload, headers=headers)
+            if response.status_code == 200:
+                logger.info(f"Low credit email sent to {email}")
+                return True
+            logger.error(f"Resend API error for low credit email: {response.status_code} - {response.text}")
+            return False
+        except Exception as e:
+            logger.error(f"Failed to send low credit email to {email}: {e}")
+            return False
+
 # Create global instance
 resend_service = ResendService()

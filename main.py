@@ -645,6 +645,107 @@ async def upload_pdf(
         logger.error(f"PDF upload failed: {e}")
         raise HTTPException(status_code=500, detail=get_context_specific_error("UPLOAD_FAILED", "upload"))
 
+# Video upload endpoint
+@app.post("/upload-video/")
+async def upload_video(
+    background_tasks: BackgroundTasks,
+    video_file: UploadFile = File(...),
+    request: Request = None,
+):
+    """Handle video file upload and processing with plan-based duration validation"""
+    # Validate file type
+    allowed_extensions = ['.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v']
+    file_extension = Path(video_file.filename).suffix.lower()
+    if file_extension not in allowed_extensions:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid file type. Please upload a video file with one of these extensions: {', '.join(allowed_extensions)}"
+        )
+
+    # Check file size (soft check; UploadFile may not provide size)
+    if hasattr(video_file, 'size') and video_file.size and video_file.size > 1024 * 1024 * 1024:  # 1GB
+        raise HTTPException(
+            status_code=400,
+            detail="Video file is too large. Please upload a file smaller than 1GB."
+        )
+
+    # Extract user information from Firebase token
+    user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+
+    # Only check if user has credits (don't deduct yet)
+    if user_id and db:
+        from credit_service import CreditAction
+        credit_result = await credit_service.check_credits(
+            user_id=user_id,
+            action=CreditAction.VIDEO_UPLOAD
+        )
+        if not credit_result.has_credits:
+            raise HTTPException(
+                status_code=402,
+                detail=f"Insufficient credits. {credit_result.message}"
+            )
+
+    # Create job
+    job_id = job_manager.create_job(
+        user_id=user_id,
+        user_email=user_email,
+        user_name=user_name,
+        action_type="VIDEO_UPLOAD"
+    )
+
+    try:
+        # Save uploaded file temporarily
+        file_path = UPLOAD_DIR / f"{job_id}_{video_file.filename}"
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(video_file.file, buffer)
+
+        # Server-side duration validation against plan
+        try:
+            # Determine user's plan from Firestore
+            user_plan = video_validation_service.get_user_plan_from_firestore(db, user_id) if user_id else 'free'
+            validation = video_validation_service.validate_video_duration(str(file_path), user_plan, user_id)
+            if not validation.is_valid:
+                # Cleanup and return plan-limited error
+                try:
+                    if file_path.exists():
+                        file_path.unlink(missing_ok=True)  # type: ignore
+                except Exception:
+                    pass
+                # Build suggestion if available
+                suggestion = video_validation_service.get_plan_upgrade_suggestion(validation.user_plan, validation.duration_minutes or 0)
+                raise HTTPException(
+                    status_code=402,
+                    detail={
+                        "detail": validation.message,
+                        "currentPlan": validation.user_plan,
+                        "allowedMinutes": validation.allowed_minutes,
+                        "durationMinutes": validation.duration_minutes,
+                        "suggestion": suggestion,
+                    }
+                )
+        except HTTPException:
+            # Propagate plan limit error
+            raise
+        except Exception as ve:
+            logger.error(f"Video validation failed: {ve}")
+            # Non-fatal; proceed but warn user gracefully
+
+        # Set job to processing status before starting background task
+        job_manager.update_job_status(job_id, "processing", "Starting video processing...")
+
+        # Start background processing using the same pipeline
+        background_tasks.add_task(processing_service.process_video_file, job_id, str(file_path), user_id)
+
+        return {"job_id": job_id, "message": "Video uploaded successfully. Processing started."}
+
+    except HTTPException:
+        job_manager.set_job_error(job_id, "Video upload failed due to plan limits or validation error")
+        raise
+    except Exception as e:
+        job_manager.set_job_error(job_id, str(e))
+        logger.error(f"Video upload failed: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upload video file. Please try again.")
+
 # Audio upload endpoint
 @app.post("/upload-audio/")
 async def upload_audio(

@@ -175,6 +175,12 @@ class CreditService:
                 logger.info(f"🔄 Migrating user {user_id} to standardized credit fields")
             
             user_ref.update(update_data)
+
+            # Send low credit warning if threshold crossed and not recently notified
+            try:
+                await self._maybe_send_low_credit_warning(user_ref, user_data, new_credits)
+            except Exception as warn_err:
+                logger.warning(f"⚠️ Failed to send low credit warning for {user_id}: {warn_err}")
             
             # Log credit usage
             await self._log_credit_usage(user_id, action, credits_needed, new_credits)
@@ -283,6 +289,42 @@ class CreditService:
         except Exception as e:
             logger.warning(f"⚠️ Failed to refresh monthly credits: {e}")
             return user_data.get('current_credits', user_data.get('credits', 0))
+
+    async def _maybe_send_low_credit_warning(self, user_ref, user_data, new_credits: int):
+        """Send low-credit email via Resend when crossing thresholds, throttled by 7 days."""
+        try:
+            email = user_data.get('email')
+            name = user_data.get('name')
+            plan = str(user_data.get('plan', user_data.get('currentPlan', 'free'))).lower()
+            if not email:
+                return
+            # Thresholds: 20, 10, 5, 1 credits; also zero
+            thresholds = [20, 10, 5, 1, 0]
+            # Find next threshold below or equal to current credits
+            crossed = any(new_credits == t or (new_credits < t and (user_data.get('current_credits', user_data.get('credits', 0)) >= t)) for t in thresholds)
+            if not crossed:
+                return
+            # Rate limit: once every 7 days
+            last_notice = user_data.get('lastLowCreditEmail')
+            from datetime import datetime, timedelta
+            last_dt = last_notice if isinstance(last_notice, datetime) else None
+            if not last_dt and last_notice:
+                try:
+                    last_dt = datetime.fromisoformat(str(last_notice))
+                except Exception:
+                    last_dt = None
+            if last_dt and (datetime.now() - last_dt) < timedelta(days=7):
+                return
+            # Send via Resend
+            try:
+                from resend_service import resend_service
+                sent = await resend_service.send_low_credit_warning(email, name, new_credits, plan)
+                if sent:
+                    user_ref.update({'lastLowCreditEmail': datetime.now()})
+            except Exception as e:
+                logger.error(f"Error sending low-credit email: {e}")
+        except Exception as e:
+            logger.warning(f"Low credit warning check failed: {e}")
 
     async def get_user_credits(self, user_id: str, user_email: str = None, user_name: str = None) -> Dict:
         """Get user's current credit information"""
