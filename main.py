@@ -909,16 +909,18 @@ async def upload_audio(
     )
 
     try:
-        # Save uploaded file temporarily
-        file_path = UPLOAD_DIR / f"{job_id}_{audio_file.filename}"
-        with open(file_path, "wb") as buffer:
-            shutil.copyfileobj(audio_file.file, buffer)
+        # Upload to R2 as temporary media
+        if not r2_storage.is_available():
+            raise Exception("Storage is not available for uploads")
+        r2_key = r2_storage.upload_temp_media(job_id, audio_file.filename, audio_file.file, audio_file.content_type or 'application/octet-stream')
+        if not r2_key:
+            raise Exception("Failed to store the uploaded audio in storage")
 
         # Set job to processing status before starting background task
         job_manager.update_job_status(job_id, "processing", "Starting audio processing...")
 
-        # Start background processing (use the same video processing pipeline)
-        background_tasks.add_task(processing_service.process_video_file, job_id, str(file_path), user_id)
+        # Start background processing from R2 (uses same pipeline under the hood)
+        background_tasks.add_task(processing_service.process_audio_from_r2, job_id, r2_key, user_id)
 
         return JSONResponse(
             status_code=200,

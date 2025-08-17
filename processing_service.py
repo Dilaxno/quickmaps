@@ -39,6 +39,33 @@ class ProcessingService:
     def __init__(self, db_client=None):
         self.db = db_client
     
+    async def process_audio_from_r2(self, job_id: str, r2_key: str, user_id: Optional[str] = None):
+        """Download audio from R2, process with existing pipeline, then clean up R2."""
+        local_path = str(TEMP_DIR / f"{job_id}_uploaded{Path(r2_key).suffix or ''}")
+        try:
+            job_manager.update_job_progress(job_id, "Fetching audio from storage...")
+            if not r2_storage.is_available():
+                raise Exception("R2 storage is not available")
+            ok = r2_storage.download_to_path(r2_key, local_path)
+            if not ok:
+                raise Exception("Failed to download audio from storage")
+
+            # Reuse the existing video/audio processing pipeline
+            await self.process_video_file(job_id, local_path, user_id)
+        finally:
+            # Cleanup R2 object regardless of success/failure
+            try:
+                if r2_storage.is_available():
+                    r2_storage.delete_key(r2_key)
+            except Exception:
+                pass
+            # Local cleanup handled by process_video_file, but ensure if early failure
+            try:
+                if os.path.exists(local_path):
+                    os.unlink(local_path)
+            except Exception:
+                pass
+
     async def process_video_file(self, job_id: str, video_path: str, user_id: Optional[str] = None):
         """
         Process uploaded video file

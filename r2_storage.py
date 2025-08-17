@@ -938,5 +938,63 @@ class R2StorageService:
             logger.error(f"❌ Failed to delete saved note: {e}")
             return False
 
+    # Generic media helpers for temporary upload/processing
+    def upload_temp_media(self, job_id: str, filename: str, fileobj, content_type: str = 'application/octet-stream') -> Optional[str]:
+        """Upload a file-like object to a temporary location in R2 and return its key."""
+        if not self.is_available():
+            logger.warning("R2 storage not available for temp media upload")
+            return None
+        try:
+            safe_name = filename or f"file_{uuid.uuid4().hex}"
+            key = f"temp/uploads/{job_id}/{safe_name}"
+            extra = { 'ContentType': content_type or 'application/octet-stream' }
+            self.client.upload_fileobj(
+                Fileobj=fileobj,
+                Bucket=R2_BUCKET_NAME,
+                Key=key,
+                ExtraArgs=extra
+            )
+            logger.info(f"✅ Uploaded temp media to R2: {key}")
+            return key
+        except Exception as e:
+            logger.error(f"❌ Failed to upload temp media to R2: {e}")
+            return None
+
+    def download_to_path(self, key: str, dest_path: str) -> bool:
+        """Download an R2 object to a local filesystem path."""
+        if not self.is_available():
+            logger.warning("R2 storage not available for download")
+            return False
+        try:
+            Path(dest_path).parent.mkdir(parents=True, exist_ok=True)
+            self.client.download_file(Bucket=R2_BUCKET_NAME, Key=key, Filename=dest_path)
+            logger.info(f"✅ Downloaded R2 object to {dest_path}: {key}")
+            return True
+        except ClientError as e:
+            logger.error(f"❌ Failed to download R2 object {key}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Unexpected error downloading R2 object {key}: {e}")
+            return False
+
+    def delete_key(self, key: str) -> bool:
+        """Delete an object by key from R2."""
+        if not self.is_available():
+            logger.warning("R2 storage not available for deletion")
+            return False
+        try:
+            self.client.delete_object(Bucket=R2_BUCKET_NAME, Key=key)
+            logger.info(f"✅ Deleted R2 object: {key}")
+            return True
+        except ClientError as e:
+            if e.response['Error']['Code'] == 'NoSuchKey':
+                logger.info(f"R2 object already deleted or not found: {key}")
+                return True
+            logger.error(f"❌ Failed to delete R2 object {key}: {e}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Unexpected error deleting R2 object {key}: {e}")
+            return False
+
 # Global instance
 r2_storage = R2StorageService()
