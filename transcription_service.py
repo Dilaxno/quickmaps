@@ -1,7 +1,7 @@
 """
 Transcription Service Module
 
-Deepgram-only transcription (model: whisper-large by default).
+Deepgram-only transcription (model: nova-2 by default).
 """
 
 import json
@@ -23,7 +23,7 @@ class TranscriptionService:
 
     def __init__(self):
         self.use_deepgram = USE_DEEPGRAM and bool(DEEPGRAM_API_KEY)
-        # Configure generous timeouts, especially for whisper-large
+        # Configure generous timeouts, compatible with nova models
         try:
             self.deepgram_timeout = int(os.getenv("DEEPGRAM_TIMEOUT_SECONDS", "900"))  # total read/write timeout
         except Exception:
@@ -93,7 +93,7 @@ class TranscriptionService:
         return segments
 
     def _transcribe_with_deepgram_http(self, audio_path: str) -> Dict[str, Any]:
-        """Fallback method using direct HTTP requests to Deepgram API"""
+        """Fallback method using direct HTTP requests to Deepgram API (nova)"""
         import httpx
         from pathlib import Path
         
@@ -121,7 +121,7 @@ class TranscriptionService:
             }
             
             params = {
-                'model': DEEPGRAM_MODEL or 'whisper-large',
+                'model': DEEPGRAM_MODEL or 'nova-2',
                 'smart_format': 'true',
                 'punctuate': 'true',
                 'paragraphs': 'true',
@@ -172,7 +172,7 @@ class TranscriptionService:
             raise
 
     def _transcribe_with_deepgram(self, audio_path: str) -> Dict[str, Any]:
-        """Call Deepgram prerecorded transcription with whisper-large using SDK v4.x"""
+        """Call Deepgram prerecorded transcription with Deepgram Nova using SDK v4.x"""
         try:
             from deepgram import DeepgramClient, PrerecordedOptions, FileSource
         except Exception as e:
@@ -181,7 +181,7 @@ class TranscriptionService:
             ) from e
 
         try:
-            logger.info(f"🎤 Starting Deepgram transcription with model: {DEEPGRAM_MODEL or 'whisper-large'}")
+            logger.info(f"🎤 Starting Deepgram transcription with model: {DEEPGRAM_MODEL or 'nova-2'}")
             
             # Create client - SDK v4.x uses different initialization
             client = DeepgramClient(DEEPGRAM_API_KEY)
@@ -197,7 +197,7 @@ class TranscriptionService:
 
             # SDK v4.x options
             options = PrerecordedOptions(
-                model=DEEPGRAM_MODEL or "whisper-large",
+                model=DEEPGRAM_MODEL or "nova-2",
                 smart_format=True,
                 punctuate=True,
                 paragraphs=True,

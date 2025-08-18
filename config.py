@@ -82,7 +82,7 @@ class Config:
     # Transcription Configuration - Deepgram (Primary)
     USE_DEEPGRAM: bool = os.getenv("USE_DEEPGRAM", "true").lower() == "true"
     DEEPGRAM_API_KEY: str = os.getenv("DEEPGRAM_API_KEY", "")
-    DEEPGRAM_MODEL: str = os.getenv("DEEPGRAM_MODEL", "whisper-large")
+    DEEPGRAM_MODEL: str = os.getenv("DEEPGRAM_MODEL", "nova-2")
     
     # Transcription Configuration - Local Whisper (Fallback)
     WHISPER_MODEL: str = os.getenv("WHISPER_MODEL", "small")
@@ -274,7 +274,7 @@ PADDLE_ENVIRONMENT = config.PADDLE_ENVIRONMENT
 if not config.is_production():
     print(f"🔧 Configuration loaded:")
     print(f"   Environment: {config.ENVIRONMENT}")
-    print(f"   Transcription: {config.get_transcription_service()}")
+    print(f"   Transcription: {config.get_transcription_service()} (model={config.DEEPGRAM_MODEL})")
     print(f"   Notes Generation: {'✅' if config.ENABLE_NOTES_GENERATION else '❌'}")
     print(f"   R2 Storage: {'✅' if config.ENABLE_R2_STORAGE else '❌'}")
     
