@@ -272,7 +272,6 @@ class PaymentService:
             'pri_01k2ade8nh1tta3g336vzwa59x': 'yearly'
         }
 
->
         
         billing_cycle = price_id_mapping.get(price_id)
         if billing_cycle:
