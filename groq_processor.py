@@ -509,8 +509,8 @@ UNIQUENESS REQUIREMENTS:
             fixed_lines.append(content_text)
         
         return '\n'.join(fixed_lines)
-        
-        def _split_text_by_word_limit(self, text: str, max_words: int) -> list[str]:
+
+    def _split_text_by_word_limit(self, text: str, max_words: int) -> list[str]:
         """Split a text into chunks not exceeding max_words, preferring sentence boundaries."""
         import re
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', str(text or '').strip()) if s.strip()]
@@ -518,94 +518,94 @@ UNIQUENESS REQUIREMENTS:
         current: list[str] = []
         count = 0
         for s in sentences:
-        words = s.split()
-        if not words:
-        continue
-        if count + len(words) <= max_words:
-        current.append(s)
-        count += len(words)
-        else:
+            words = s.split()
+            if not words:
+                continue
+            if count + len(words) <= max_words:
+                current.append(s)
+                count += len(words)
+            else:
+                if current:
+                    chunks.append(' '.join(current).strip())
+                    current = []
+                    count = 0
+                # If the sentence itself is longer than max_words, hard-split by words
+                while len(words) > max_words:
+                    chunks.append(' '.join(words[:max_words]).strip())
+                    words = words[max_words:]
+                if words:
+                    current = [' '.join(words).strip()]
+                    count = len(words)
         if current:
-        chunks.append(' '.join(current).strip())
-        current = []
-        count = 0
-        # If the sentence itself is longer than max_words, hard-split by words
-        while len(words) > max_words:
-        chunks.append(' '.join(words[:max_words]).strip())
-        words = words[max_words:]
-        if words:
-        current = [' '.join(words).strip()]
-        count = len(words)
-        if current:
-        chunks.append(' '.join(current).strip())
+            chunks.append(' '.join(current).strip())
         # Handle case when there were no sentence boundaries
         if not chunks and text:
-        words = text.split()
-        for i in range(0, len(words), max_words):
-        chunks.append(' '.join(words[i:i+max_words]).strip())
+            words = text.split()
+            for i in range(0, len(words), max_words):
+                chunks.append(' '.join(words[i:i+max_words]).strip())
         return chunks
-        
-        def _enforce_word_limit_on_notes(self, notes: str, max_words: int = 50) -> str:
+
+    def _enforce_word_limit_on_notes(self, notes: str, max_words: int = 50) -> str:
         """Ensure each note section has <= max_words words; split longer sections into continuations."""
         lines = (notes or '').splitlines()
         result_lines: list[str] = []
         current_title: str | None = None
         current_content: list[str] = []
-        
+
         def flush_section():
-        nonlocal result_lines, current_title, current_content
-        if current_title is None:
-        # No title context; dump content as-is
-        for l in current_content:
-        result_lines.append(l)
-        current_content = []
-        return
-        content_text = '\n'.join(current_content).strip()
-        if not content_text:
-        result_lines.append(current_title)
-        result_lines.append('')
-        else:
-        chunks = self._split_text_by_word_limit(content_text, max_words)
-        if len(chunks) <= 1:
-        result_lines.append(current_title)
-        result_lines.append('')
-        result_lines.append(chunks[0] if chunks else content_text)
-        result_lines.append('')
-        else:
-        # Emit first as original title, subsequent with (cont. N)
-        for idx, chunk in enumerate(chunks):
-        if idx == 0:
-        title_out = current_title
-        else:
-        if current_title.strip().startswith('##'):
-        base = current_title.strip()[2:].strip()
-        title_out = f"## {base} (cont. {idx+1})"
-        else:
-        title_out = f"{current_title} (cont. {idx+1})"
-        result_lines.append(title_out)
-        result_lines.append('')
-        result_lines.append(chunk)
-        result_lines.append('')
-        current_title = None
-        current_content = []
-        
+            nonlocal result_lines, current_title, current_content
+            if current_title is None:
+                # No title context; dump content as-is
+                for l in current_content:
+                    result_lines.append(l)
+                current_content = []
+                return
+            content_text = '\n'.join(current_content).strip()
+            if not content_text:
+                result_lines.append(current_title)
+                result_lines.append('')
+            else:
+                chunks = self._split_text_by_word_limit(content_text, max_words)
+                if len(chunks) <= 1:
+                    result_lines.append(current_title)
+                    result_lines.append('')
+                    result_lines.append(chunks[0] if chunks else content_text)
+                    result_lines.append('')
+                else:
+                    # Emit first as original title, subsequent with (cont. N)
+                    for idx, chunk in enumerate(chunks):
+                        if idx == 0:
+                            title_out = current_title
+                        else:
+                            if current_title.strip().startswith('##'):
+                                base = current_title.strip()[2:].strip()
+                                title_out = f"## {base} (cont. {idx+1})"
+                            else:
+                                title_out = f"{current_title} (cont. {idx+1})"
+                        result_lines.append(title_out)
+                        result_lines.append('')
+                        result_lines.append(chunk)
+                        result_lines.append('')
+            current_title = None
+            current_content = []
+
         for line in lines:
-        striped = line.strip()
-        if striped.startswith('##') and not striped.startswith('###'):
+            striped = line.strip()
+            if striped.startswith('##') and not striped.startswith('###'):
+                if current_title is not None:
+                    flush_section()
+                current_title = striped
+                current_content = []
+            else:
+                if current_title is None:
+                    result_lines.append(line)
+                else:
+                    current_content.append(line)
         if current_title is not None:
-        flush_section()
-        current_title = striped
-        current_content = []
-        else:
-        if current_title is None:
-        result_lines.append(line)
-        else:
-        current_content.append(line)
-        if current_title is not None:
-        flush_section()
+            flush_section()
         return '\n'.join(result_lines).strip()
-        
-        def _is_content_insufficient(self, content: str) -> bool:
+
+    def _is_content_insufficient(self, content: str) -> bool:
         """Check if content is insufficient (just bullet points, too short, or generic)"""
         if not content or len(content.strip()) < 100:
             return True
