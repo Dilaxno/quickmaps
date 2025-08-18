@@ -362,8 +362,8 @@ credit_service.db = db
 logger.info("Credit service initialized with Firestore client")
 # Initialize collaboration service with Firestore client
 try:
-            collaboration_service.set_db(db)
-        invited_member_auth_service.set_db(db)
+    collaboration_service.set_db(db)
+    invited_member_auth_service.set_db(db)
     logger.info("Collaboration service initialized")
 except Exception as e:
     logger.error(f"Failed to initialize collaboration service: {e}")
