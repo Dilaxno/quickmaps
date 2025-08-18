@@ -145,24 +145,7 @@ async def ping():
 
 @router.post("/suggest", response_model=SuggestResponse)
 async def suggest_sources(req: SuggestRequest):
-    text = (req.text or "").strip()
-    topic = _infer_topic(text, req.topic)
-    level = (req.level or "intro").lower().strip()
-    kws = _gen_keywords(topic, level, text)
-    ref_types = _reference_types(level)
-    queries = _recommended_queries(topic, kws)
-
-    return SuggestResponse(
-        topic=topic,
-        level=level,
-        keywords=kws,
-        reference_types=ref_types,
-        recommended_queries=queries,
-        scholarly_api_hint=(
-            "For higher-quality scholarly coverage, search Crossref or Semantic Scholar APIs "
-            "with the recommended keywords; combine with venue filters (e.g., NeurIPS, ACL, IEEE)."
-        ),
-    )
+    raise HTTPException(status_code=410, detail="Citations feature has been removed")
 
 
 def _focus_to_filter(focus: str) -> Optional[str]:
@@ -206,35 +189,7 @@ async def _google_cse_search(query: str, num: int = 5, lang: Optional[str] = Non
 
 @router.post("/search", response_model=SearchResponse)
 async def search_sources(req: SearchRequest):
-    query = (req.query or "").strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="query is required")
-
-    extra = _focus_to_filter(req.focus)
-    full_q = f"{query} {extra}" if extra else query
-
-    try:
-        data = await _google_cse_search(full_q, req.num or 5, req.lang)
-        items = data.get("items", [])
-        results = [
-            SearchResult(
-                title=i.get("title", ""),
-                link=i.get("link", ""),
-                snippet=i.get("snippet"),
-                displayLink=i.get("displayLink"),
-            )
-            for i in items
-        ]
-        return SearchResponse(query=full_q, focus=req.focus or "general", results=results, provider="google_cse")
-    except RuntimeError as e:
-        # CSE not configured — return empty results with note
-        return SearchResponse(
-            query=full_q,
-            focus=req.focus or "general",
-            results=[],
-            provider="google_cse",
-            note=str(e),
-        )
+    raise HTTPException(status_code=410, detail="Citations feature has been removed")
 
 
 class QuickRequest(BaseModel):
@@ -250,11 +205,4 @@ class QuickResponse(BaseModel):
 
 @router.post("/quick", response_model=QuickResponse)
 async def quick_citations(req: QuickRequest):
-    # First, suggest likely sources and queries
-    suggestions = await suggest_sources(SuggestRequest(text=req.text, level=req.level))
-
-    # Try the first recommended query (fallback to original text if empty)
-    first_q = suggestions.recommended_queries[0] if suggestions.recommended_queries else (req.text or "").strip()
-    search = await search_sources(SearchRequest(query=first_q, focus=req.focus, num=req.num))
-
-    return QuickResponse(suggestions=suggestions, search=search)
+    raise HTTPException(status_code=410, detail="Citations feature has been removed")
