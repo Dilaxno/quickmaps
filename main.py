@@ -3194,7 +3194,7 @@ async def paddle_webhook(request: Request):
 
                 # Try to find user by subscription_id, email, or stored paddle_customer_id
                 if subscription_id:
-                    docs = list(db.collection('users').where('subscription_id', '==', subscription_id).limit(1).stream())
+                    docs = list(db.collection('users').where('subscriptionId', '==', subscription_id).limit(1).stream())
                     if docs:
                         user_id = docs[0].id
                 if not user_id and customer_email:
@@ -3202,7 +3202,7 @@ async def paddle_webhook(request: Request):
                     if docs:
                         user_id = docs[0].id
                 if not user_id and customer_id:
-                    docs = list(db.collection('users').where('paddle_customer_id', '==', customer_id).limit(1).stream())
+                    docs = list(db.collection('users').where('customerId', '==', customer_id).limit(1).stream())
                     if docs:
                         user_id = docs[0].id
 

@@ -107,7 +107,7 @@ async def get_stats(uid: Optional[str] = None, username: Optional[str] = None, d
             referred_user_ids.add(uid_ref)
 
     referrals_count = len(referred_user_ids)
-    commission = total_revenue * 0.30
+    commission = total_revenue * 0.35
 
     # Clicks aggregation
     clicks_q = db.collection('affiliate_clicks').where('affiliateRef', '==', aff_username)

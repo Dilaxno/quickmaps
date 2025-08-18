@@ -9,7 +9,7 @@ from firebase_admin import firestore
 _TASK: Optional[asyncio.Task] = None
 
 
-def _compute_totals_for_affiliate(db: firestore.Client, aff_doc: firestore.DocumentSnapshot, commission_rate: float = 0.30):
+def _compute_totals_for_affiliate(db: firestore.Client, aff_doc: firestore.DocumentSnapshot, commission_rate: float = 0.35):
     """
     Recompute totals and referralsCount for a single affiliate from payments collection.
     Writes results back to affiliates/{uid} in a single update.
@@ -56,7 +56,7 @@ def _compute_totals_for_affiliate(db: firestore.Client, aff_doc: firestore.Docum
     })
 
 
-def _recompute_all_sync(db: firestore.Client, logger: logging.Logger, commission_rate: float = 0.30):
+def _recompute_all_sync(db: firestore.Client, logger: logging.Logger, commission_rate: float = 0.35):
     """Synchronous full recompute across all affiliates."""
     affiliates = db.collection('affiliates').stream()
     count = 0
@@ -69,7 +69,7 @@ def _recompute_all_sync(db: firestore.Client, logger: logging.Logger, commission
     logger.info(f"Affiliate totals recompute completed for {count} affiliates")
 
 
-def _recompute_single_sync(db: firestore.Client, logger: logging.Logger, uid: Optional[str] = None, username: Optional[str] = None, commission_rate: float = 0.30) -> str:
+def _recompute_single_sync(db: firestore.Client, logger: logging.Logger, uid: Optional[str] = None, username: Optional[str] = None, commission_rate: float = 0.35) -> str:
     """Recompute for a single affiliate identified by uid or username. Returns affiliate uid."""
     aff_doc = None
     if uid:
@@ -93,17 +93,17 @@ def _recompute_single_sync(db: firestore.Client, logger: logging.Logger, uid: Op
     return uid_res
 
 
-async def trigger_recompute_all(logger: logging.Logger, db: firestore.Client, commission_rate: float = 0.30):
+async def trigger_recompute_all(logger: logging.Logger, db: firestore.Client, commission_rate: float = 0.35):
     """Public async API to trigger one-off recompute for all affiliates."""
     await asyncio.to_thread(_recompute_all_sync, db, logger, commission_rate)
 
 
-async def trigger_recompute_single(logger: logging.Logger, db: firestore.Client, uid: Optional[str] = None, username: Optional[str] = None, commission_rate: float = 0.30) -> str:
+async def trigger_recompute_single(logger: logging.Logger, db: firestore.Client, uid: Optional[str] = None, username: Optional[str] = None, commission_rate: float = 0.35) -> str:
     """Public async API to recompute a single affiliate by uid or username."""
     return await asyncio.to_thread(_recompute_single_sync, db, logger, uid, username, commission_rate)
 
 
-async def _loop(logger: logging.Logger, db: firestore.Client, interval_seconds: int, commission_rate: float = 0.30):
+async def _loop(logger: logging.Logger, db: firestore.Client, interval_seconds: int, commission_rate: float = 0.35):
     logger.info(f"Affiliate totals scheduler running every {interval_seconds}s")
     while True:
         try:
