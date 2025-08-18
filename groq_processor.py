@@ -1,6 +1,13 @@
 """
 Groq API integration for generating structured learning notes from transcriptions
 with auto-generated diagram functionality
+
+ENHANCED WORD LIMIT ENFORCEMENT:
+- Strict 50-word limit per note section (configurable via NOTES_MAX_WORDS env var)
+- Automatic chunking for long videos with optimized chunk sizes
+- Intelligent text splitting that respects sentence boundaries
+- Comprehensive logging and validation of word limits
+- Support for very long videos (>50k chars) with smaller processing chunks
 """
 
 import logging
@@ -21,6 +28,26 @@ try:
     _GROQ_MIN_INTERVAL = float(os.getenv("GROQ_MIN_INTERVAL_SECONDS", "1.0"))
 except Exception:
     _GROQ_MIN_INTERVAL = 1.0
+
+# Word limit configuration
+try:
+    _DEFAULT_WORD_LIMIT = int(os.getenv("NOTES_MAX_WORDS", "50"))
+except Exception:
+    _DEFAULT_WORD_LIMIT = 50
+
+# Chunk size configuration for different content lengths
+try:
+    _VERY_LONG_VIDEO_THRESHOLD = int(os.getenv("VERY_LONG_VIDEO_CHARS", "50000"))
+    _LONG_VIDEO_THRESHOLD = int(os.getenv("LONG_VIDEO_CHARS", "20000"))
+    _VERY_LONG_CHUNK_SIZE = int(os.getenv("VERY_LONG_CHUNK_SIZE", "8000"))
+    _LONG_CHUNK_SIZE = int(os.getenv("LONG_CHUNK_SIZE", "12000"))
+    _STANDARD_CHUNK_SIZE = int(os.getenv("STANDARD_CHUNK_SIZE", "15000"))
+except Exception:
+    _VERY_LONG_VIDEO_THRESHOLD = 50000
+    _LONG_VIDEO_THRESHOLD = 20000
+    _VERY_LONG_CHUNK_SIZE = 8000
+    _LONG_CHUNK_SIZE = 12000
+    _STANDARD_CHUNK_SIZE = 15000
 
 class GroqNotesGenerator:
     """Generate structured learning notes using Groq API"""
@@ -202,8 +229,16 @@ UNIQUENESS REQUIREMENTS:
         
         try:
             # Split long content into chunks if needed
-            max_chunk_size = 15000  # Conservative limit for API
+            # For very long videos, use smaller chunks to ensure better 50-word limit enforcement
+            if len(transcription) > _VERY_LONG_VIDEO_THRESHOLD:  # Very long videos (>50k chars)
+                max_chunk_size = _VERY_LONG_CHUNK_SIZE  # Smaller chunks for better processing
+            elif len(transcription) > _LONG_VIDEO_THRESHOLD:  # Long videos (20k-50k chars)
+                max_chunk_size = _LONG_CHUNK_SIZE  # Medium chunks
+            else:
+                max_chunk_size = _STANDARD_CHUNK_SIZE  # Standard chunks for shorter content
+            
             chunks = self._split_content(transcription, max_chunk_size)
+            logger.info(f"Split content into {len(chunks)} chunks (max size: {max_chunk_size} chars, total: {len(transcription)} chars)")
             
             # Generate notes with uniqueness tracking
             notes = None
@@ -221,11 +256,20 @@ UNIQUENESS REQUIREMENTS:
                 
                 # Enforce per-note word limit before uniqueness tracking
                 if notes:
-                    try:
-                        max_words = int(os.getenv("NOTES_MAX_WORDS", "50"))
-                    except Exception:
-                        max_words = 50
+                    max_words = _DEFAULT_WORD_LIMIT
+                    
+                    # Log the word limit being applied
+                    logger.info(f"Enforcing {max_words}-word limit on notes (content type: {content_type})")
+                    
+                    # Enforce the word limit
+                    original_notes = notes
                     notes = self._enforce_word_limit_on_notes(notes, max_words)
+                    
+                    # Log the enforcement results
+                    if notes != original_notes:
+                        logger.info(f"Word limit enforced: notes were split/truncated to meet {max_words}-word requirement")
+                    else:
+                        logger.info(f"Notes already comply with {max_words}-word limit")
 
                 # Check for uniqueness
                 if notes and not self._is_content_similar(notes):
@@ -244,6 +288,17 @@ UNIQUENESS REQUIREMENTS:
             if notes:
                 logger.warning("Using potentially similar content after max attempts")
                 self._track_generated_content(notes)
+                
+                # Final validation: ensure word limit is strictly enforced
+                try:
+                    max_words = _DEFAULT_WORD_LIMIT
+                    final_notes = self._enforce_word_limit_on_notes(notes, max_words)
+                    if final_notes != notes:
+                        logger.info("Final word limit enforcement applied to similar content")
+                        notes = final_notes
+                except Exception as e:
+                    logger.warning(f"Final word limit enforcement failed: {e}")
+                
                 return notes
             
             return None
@@ -512,11 +567,19 @@ UNIQUENESS REQUIREMENTS:
 
     def _split_text_by_word_limit(self, text: str, max_words: int) -> list[str]:
         """Split a text into chunks not exceeding max_words, preferring sentence boundaries."""
+        if not text or max_words <= 0:
+            return [text] if text else []
+            
         import re
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', str(text or '').strip()) if s.strip()]
         chunks: list[str] = []
         current: list[str] = []
         count = 0
+        
+        # Track splitting statistics
+        total_words = len(text.split())
+        chunks_created = 0
+        
         for s in sentences:
             words = s.split()
             if not words:
@@ -527,52 +590,94 @@ UNIQUENESS REQUIREMENTS:
             else:
                 if current:
                     chunks.append(' '.join(current).strip())
+                    chunks_created += 1
                     current = []
                     count = 0
                 # If the sentence itself is longer than max_words, hard-split by words
                 while len(words) > max_words:
                     chunks.append(' '.join(words[:max_words]).strip())
+                    chunks_created += 1
                     words = words[max_words:]
                 if words:
                     current = [' '.join(words).strip()]
                     count = len(words)
+        
         if current:
             chunks.append(' '.join(current).strip())
+            chunks_created += 1
+            
         # Handle case when there were no sentence boundaries
         if not chunks and text:
             words = text.split()
             for i in range(0, len(words), max_words):
                 chunks.append(' '.join(words[i:i+max_words]).strip())
+                chunks_created += 1
+        
+        # Validate that all chunks respect the word limit
+        for i, chunk in enumerate(chunks):
+            chunk_words = len(chunk.split())
+            if chunk_words > max_words:
+                logger.warning(f"Chunk {i+1} exceeds word limit: {chunk_words} > {max_words} words")
+                # Force split if still too long
+                if chunk_words > max_words * 1.5:  # If significantly over limit
+                    words = chunk.split()
+                    chunks[i] = ' '.join(words[:max_words]).strip()
+                    # Add remaining words as new chunk if any
+                    remaining = words[max_words:]
+                    if remaining:
+                        chunks.insert(i + 1, ' '.join(remaining).strip())
+        
+        # Log splitting results
+        if chunks_created > 1:
+            logger.info(f"Text split into {chunks_created} chunks (original: {total_words} words, max per chunk: {max_words})")
+        
         return chunks
 
     def _enforce_word_limit_on_notes(self, notes: str, max_words: int = 50) -> str:
         """Ensure each note section has <= max_words words; split longer sections into continuations."""
+        if not notes:
+            return notes
+            
         lines = (notes or '').splitlines()
         result_lines: list[str] = []
         current_title: str | None = None
         current_content: list[str] = []
+        
+        # Track enforcement statistics
+        sections_processed = 0
+        sections_split = 0
+        total_words_before = 0
+        total_words_after = 0
 
         def flush_section():
-            nonlocal result_lines, current_title, current_content
+            nonlocal result_lines, current_title, current_content, sections_processed, sections_split, total_words_before, total_words_after
             if current_title is None:
                 # No title context; dump content as-is
                 for l in current_content:
                     result_lines.append(l)
                 current_content = []
                 return
+                
             content_text = '\n'.join(current_content).strip()
             if not content_text:
                 result_lines.append(current_title)
                 result_lines.append('')
+                sections_processed += 1
             else:
+                # Count words before splitting
+                words_before = len(content_text.split())
+                total_words_before += words_before
+                
                 chunks = self._split_text_by_word_limit(content_text, max_words)
                 if len(chunks) <= 1:
                     result_lines.append(current_title)
                     result_lines.append('')
                     result_lines.append(chunks[0] if chunks else content_text)
                     result_lines.append('')
+                    sections_processed += 1
                 else:
                     # Emit first as original title, subsequent with (cont. N)
+                    sections_split += 1
                     for idx, chunk in enumerate(chunks):
                         if idx == 0:
                             title_out = current_title
@@ -586,6 +691,12 @@ UNIQUENESS REQUIREMENTS:
                         result_lines.append('')
                         result_lines.append(chunk)
                         result_lines.append('')
+                        sections_processed += 1
+                
+                # Count words after splitting
+                for chunk in chunks:
+                    total_words_after += len(chunk.split())
+                    
             current_title = None
             current_content = []
 
@@ -603,6 +714,13 @@ UNIQUENESS REQUIREMENTS:
                     current_content.append(line)
         if current_title is not None:
             flush_section()
+        
+        # Log enforcement statistics
+        if sections_processed > 0:
+            logger.info(f"Word limit enforcement completed: {sections_processed} sections processed, {sections_split} sections split")
+            if total_words_before > 0 and total_words_after > 0:
+                logger.info(f"Word count: {total_words_before} → {total_words_after} (max per section: {max_words})")
+        
         return '\n'.join(result_lines).strip()
 
     def _is_content_insufficient(self, content: str) -> bool:
