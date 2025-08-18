@@ -65,6 +65,7 @@ from job_manager import job_manager
 from file_utils import file_utils
 from processing_service import processing_service
 from affiliate_recompute_job import start_affiliate_recompute_scheduler, stop_affiliate_recompute_scheduler
+from citations_routes import router as citations_router
 
 # Setup logging
 logging.basicConfig(level=getattr(logging, LOG_LEVEL), format=LOG_FORMAT)
@@ -283,7 +284,8 @@ logger.info("Payment, notification and affiliate services initialized")
 try:
     affiliate_routes.init(db)
     app.include_router(affiliate_routes.router)
-    logger.info("Affiliate routes mounted")
+    app.include_router(citations_router)
+    logger.info("Affiliate and citations routes mounted")
 except Exception as e:
     logger.error(f"Failed to mount affiliate routes: {e}")
 
