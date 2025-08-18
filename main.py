@@ -67,6 +67,7 @@ from processing_service import processing_service
 from affiliate_recompute_job import start_affiliate_recompute_scheduler, stop_affiliate_recompute_scheduler
 from citations_routes import router as citations_router
 from collaboration_service import collaboration_service
+from invited_member_auth_service import invited_member_auth_service
 
 # Setup logging
 logging.basicConfig(level=getattr(logging, LOG_LEVEL), format=LOG_FORMAT)
@@ -361,7 +362,8 @@ credit_service.db = db
 logger.info("Credit service initialized with Firestore client")
 # Initialize collaboration service with Firestore client
 try:
-    collaboration_service.set_db(db)
+            collaboration_service.set_db(db)
+        invited_member_auth_service.set_db(db)
     logger.info("Collaboration service initialized")
 except Exception as e:
     logger.error(f"Failed to initialize collaboration service: {e}")
@@ -497,6 +499,40 @@ async def options_handler(path: str):
     return {"message": "OK"}
 
 # ---------------------- Collaboration Endpoints ----------------------
+
+# Invited Member Authentication
+@app.post("/api/invited-members/auth")
+async def authenticate_invited_member_endpoint(req: dict):
+    try:
+        email = req.get('email')
+        password = req.get('password')
+        
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="Email and password are required")
+            
+        result = await collaboration_service.authenticate_invited_member(email=email, password=password)
+        if not result.get('success'):
+            raise HTTPException(status_code=401, detail=result.get('error', 'Authentication failed'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error authenticating invited member: {e}")
+        raise HTTPException(status_code=500, detail="Failed to authenticate invited member")
+
+@app.get("/api/invited-members/session/{session_id}")
+async def get_invited_member_session_endpoint(session_id: str):
+    try:
+        result = await collaboration_service.get_invited_member_session(session_id=session_id)
+        if not result.get('success'):
+            raise HTTPException(status_code=404, detail=result.get('error', 'Session not found'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting invited member session: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get invited member session")
+
 @app.post("/api/workspaces")
 async def create_workspace_endpoint(req: CreateWorkspaceRequest, request: Request = None):
     try:

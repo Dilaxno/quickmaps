@@ -9,6 +9,8 @@ import os
 import logging
 import uuid
 import secrets
+import random
+import string
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 from firebase_admin import firestore
@@ -23,6 +25,10 @@ class CollaborationService:
     def set_db(self, db_client):
         """Set the Firestore database client"""
         self.db = db_client
+        
+    def _generate_invited_member_password(self) -> str:
+        """Generate a random 6-digit password for invited members"""
+        return ''.join(random.choices(string.digits, k=6))
         
     async def create_workspace(self, owner_id: str, name: str, description: str = None) -> Dict:
         """Create a new workspace"""
@@ -131,9 +137,10 @@ class CollaborationService:
             if inviter_role not in ['owner', 'admin']:
                 raise Exception("You don't have permission to invite collaborators")
             
-            # Generate invitation token
+            # Generate invitation token and password
             invitation_token = secrets.token_urlsafe(32)
             invitation_id = str(uuid.uuid4())
+            invited_member_password = self._generate_invited_member_password()
             
             # Create invitation record
             invitation_data = {
@@ -152,13 +159,31 @@ class CollaborationService:
             # Save invitation
             self.db.collection('invitations').document(invitation_id).set(invitation_data)
             
+            # Create invited member record
+            invited_member_data = {
+                'id': invitation_id,  # Use invitation_id as the document ID for easy lookup
+                'email': email,
+                'password': invited_member_password,  # Store hashed password in production
+                'workspace_id': workspace_id,
+                'workspace_name': workspace_name or workspace_data.get('name', 'Untitled Workspace'),
+                'role': role,
+                'inviter_id': inviter_id,
+                'status': 'pending',
+                'created_at': datetime.utcnow(),
+                'expires_at': datetime.utcnow() + timedelta(days=7)
+            }
+            
+            # Save invited member record
+            self.db.collection('invited_members').document(invitation_id).set(invited_member_data)
+            
             # Send invitation email
             await self._send_invitation_email(
                 email=email,
                 workspace_name=workspace_name or workspace_data.get('name', 'Untitled Workspace'),
                 inviter_name=workspace_data.get('members', {}).get(inviter_id, {}).get('name', 'Someone'),
                 role=role,
-                invitation_token=invitation_token
+                invitation_token=invitation_token,
+                invited_member_password=invited_member_password
             )
             
             logger.info(f"✅ Sent invitation to {email} for workspace {workspace_id}")
@@ -372,6 +397,101 @@ class CollaborationService:
             logger.error(f"❌ Error unbanning collaborator: {e}")
             return { 'success': False, 'error': str(e) }
     
+    async def authenticate_invited_member(self, email: str, password: str) -> Dict:
+        """Authenticate an invited member using email and password"""
+        try:
+            if not self.db:
+                raise Exception("Database not initialized")
+            
+            # Find invited member by email
+            invited_members_ref = self.db.collection('invited_members')
+            query = invited_members_ref.where('email', '==', email).where('status', '==', 'pending')
+            
+            invited_member_doc = None
+            for doc in query.stream():
+                invited_member_doc = doc
+                break
+                
+            if not invited_member_doc:
+                raise Exception("Invalid email or invitation not found")
+                
+            invited_member_data = invited_member_doc.to_dict()
+            
+            # Check if invitation is expired
+            if datetime.utcnow() > invited_member_data['expires_at']:
+                raise Exception("Invitation has expired")
+                
+            # Check password
+            if invited_member_data['password'] != password:
+                raise Exception("Invalid password")
+                
+            # Get workspace details
+            workspace_id = invited_member_data['workspace_id']
+            workspace_ref = self.db.collection('workspaces').document(workspace_id)
+            workspace_doc = workspace_ref.get()
+            
+            if not workspace_doc.exists:
+                raise Exception("Workspace not found")
+                
+            workspace_data = workspace_doc.to_dict()
+            
+            # Create a temporary user session
+            session_id = str(uuid.uuid4())
+            session_data = {
+                'id': session_id,
+                'email': email,
+                'workspace_id': workspace_id,
+                'workspace_name': invited_member_data['workspace_name'],
+                'role': invited_member_data['role'],
+                'inviter_id': invited_member_data['inviter_id'],
+                'created_at': datetime.utcnow(),
+                'expires_at': datetime.utcnow() + timedelta(hours=24)  # 24 hour session
+            }
+            
+            # Save session
+            self.db.collection('invited_member_sessions').document(session_id).set(session_data)
+            
+            logger.info(f"✅ Invited member {email} authenticated for workspace {workspace_id}")
+            return {
+                'success': True,
+                'session_id': session_id,
+                'workspace_id': workspace_id,
+                'workspace_name': invited_member_data['workspace_name'],
+                'role': invited_member_data['role'],
+                'message': 'Successfully authenticated as invited member'
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error authenticating invited member: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def get_invited_member_session(self, session_id: str) -> Dict:
+        """Get invited member session details"""
+        try:
+            if not self.db:
+                raise Exception("Database not initialized")
+                
+            session_ref = self.db.collection('invited_member_sessions').document(session_id)
+            session_doc = session_ref.get()
+            
+            if not session_doc.exists:
+                raise Exception("Session not found")
+                
+            session_data = session_doc.to_dict()
+            
+            # Check if session is expired
+            if datetime.utcnow() > session_data['expires_at']:
+                raise Exception("Session has expired")
+                
+            return {
+                'success': True,
+                'session': session_data
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ Error getting invited member session: {e}")
+            return {'success': False, 'error': str(e)}
+    
     async def get_workspace_details(self, workspace_id: str, user_id: str) -> Dict:
         """Get detailed information about a workspace"""
         try:
@@ -466,7 +586,7 @@ class CollaborationService:
             logger.error(f"❌ Error checking user permission: {e}")
             return False
     
-    async def _send_invitation_email(self, email: str, workspace_name: str, inviter_name: str, role: str, invitation_token: str):
+    async def _send_invitation_email(self, email: str, workspace_name: str, inviter_name: str, role: str, invitation_token: str, invited_member_password: str):
         """Send invitation email to collaborator"""
         try:
             subject = f"You've been invited to collaborate on {workspace_name}"
@@ -484,6 +604,19 @@ class CollaborationService:
                     <li>View generated notes and diagrams</li>
                     {f'<li>Generate new notes from videos</li>' if role == 'generate' else ''}
                 </ul>
+                
+                <div style="background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <h3 style="color: #495057; margin-top: 0;">Your Invited Member Credentials</h3>
+                    <p style="color: #6c757d; margin-bottom: 15px;">Use these credentials to sign in as an invited member:</p>
+                    <div style="background-color: white; border: 1px solid #ced4da; border-radius: 4px; padding: 15px;">
+                        <p style="margin: 5px 0;"><strong>Email:</strong> {email}</p>
+                        <p style="margin: 5px 0;"><strong>Password:</strong> <span style="font-family: monospace; font-size: 16px; background-color: #e9ecef; padding: 2px 6px; border-radius: 3px;">{invited_member_password}</span></p>
+                    </div>
+                    <p style="color: #6c757d; font-size: 14px; margin-top: 15px;">
+                        You can use these credentials to sign in at any time from the signin page.
+                    </p>
+                </div>
+                
                 <div style="text-align: center; margin: 30px 0;">
                     <a href="{invitation_link}" 
                        style="background-color: #4F46E5; color: white; padding: 12px 24px; 
@@ -492,8 +625,7 @@ class CollaborationService:
                     </a>
                 </div>
                 <p style="color: #666; font-size: 14px;">
-                    This invitation will expire in 7 days. If you don't have an account, 
-                    you'll be prompted to create one when you click the link.
+                    This invitation will expire in 7 days. You can use the credentials above to sign in as an invited member.
                 </p>
                 <p style="color: #666; font-size: 12px;">
                     If the button doesn't work, copy and paste this link into your browser:<br>
