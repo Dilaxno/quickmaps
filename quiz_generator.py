@@ -8,10 +8,21 @@ import json
 import re
 import random
 from typing import Dict, List, Optional, Tuple
+import os
+import time
+import threading
 from groq import Groq
 from config import GROQ_API_KEY, GROQ_MODEL
 
 logger = logging.getLogger(__name__)
+
+# Global throttling for quiz Groq calls (share with notes throttle interval if env set)
+_QUIZ_THROTTLE_LOCK = threading.Lock()
+_QUIZ_LAST_TS = 0.0
+try:
+    _QUIZ_MIN_INTERVAL = float(os.getenv("GROQ_MIN_INTERVAL_SECONDS", "1.0"))
+except Exception:
+    _QUIZ_MIN_INTERVAL = 1.0
 
 class QuizGenerator:
     """Generate interactive quizzes from learning notes"""
@@ -22,7 +33,28 @@ class QuizGenerator:
             self.client = None
         else:
             self.client = Groq(api_key=GROQ_API_KEY)
+            self._install_throttling()
     
+    def _install_throttling(self):
+        try:
+            original_create = self.client.chat.completions.create
+            def throttled_create(*args, **kwargs):
+                global _QUIZ_LAST_TS
+                with _QUIZ_THROTTLE_LOCK:
+                    now = time.time()
+                    elapsed = now - _QUIZ_LAST_TS
+                    if elapsed < _QUIZ_MIN_INTERVAL:
+                        sleep_for = _QUIZ_MIN_INTERVAL - elapsed
+                        if sleep_for > 0:
+                            time.sleep(sleep_for)
+                    result = original_create(*args, **kwargs)
+                    _QUIZ_LAST_TS = time.time()
+                    return result
+            self.client.chat.completions.create = throttled_create
+            logger.info(f"Groq quiz throttling installed: min {_QUIZ_MIN_INTERVAL}s between requests")
+        except Exception as e:
+            logger.warning(f"Failed to install Groq throttling wrapper for quiz: {e}")
+
     def is_available(self) -> bool:
         """Check if quiz generation is available"""
         return self.client is not None

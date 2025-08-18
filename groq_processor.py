@@ -6,11 +6,21 @@ with auto-generated diagram functionality
 import logging
 import hashlib
 import time
+import os
+import threading
 from typing import Optional, Dict, Set, List
 from groq import Groq
 from config import GROQ_API_KEY, GROQ_MODEL, ENABLE_NOTES_GENERATION
 
 logger = logging.getLogger(__name__)
+
+# Global throttling settings for Groq API
+_GROQ_THROTTLE_LOCK = threading.Lock()
+_GROQ_LAST_CALL_TS = 0.0
+try:
+    _GROQ_MIN_INTERVAL = float(os.getenv("GROQ_MIN_INTERVAL_SECONDS", "1.0"))
+except Exception:
+    _GROQ_MIN_INTERVAL = 1.0
 
 class GroqNotesGenerator:
     """Generate structured learning notes using Groq API"""
@@ -23,6 +33,8 @@ class GroqNotesGenerator:
         else:
             self.client = Groq(api_key=GROQ_API_KEY)
             self.model = GROQ_MODEL
+            # Install throttling on this client's chat.completions.create
+            self._install_throttling()
         
         # Track generated content to prevent repetition
         self.generated_content_hashes: Set[str] = set()
@@ -32,6 +44,33 @@ class GroqNotesGenerator:
         
         # Cleanup old tracking data periodically
         self.last_cleanup = time.time()
+
+    def _install_throttling(self):
+        """Wrap the Groq client's chat.completions.create with a throttle (min interval between requests)."""
+        try:
+            # Access nested attribute once
+            original_create = self.client.chat.completions.create
+
+            def throttled_create(*args, **kwargs):
+                global _GROQ_LAST_CALL_TS
+                # Enforce minimum interval across threads/process within this app instance
+                with _GROQ_THROTTLE_LOCK:
+                    now = time.time()
+                    elapsed = now - _GROQ_LAST_CALL_TS
+                    if elapsed < _GROQ_MIN_INTERVAL:
+                        sleep_for = _GROQ_MIN_INTERVAL - elapsed
+                        if sleep_for > 0:
+                            time.sleep(sleep_for)
+                    # Perform the API call
+                    result = original_create(*args, **kwargs)
+                    _GROQ_LAST_CALL_TS = time.time()
+                    return result
+
+            # Replace the method
+            self.client.chat.completions.create = throttled_create
+            logger.info(f"Groq throttling installed: min { _GROQ_MIN_INTERVAL }s between requests")
+        except Exception as e:
+            logger.warning(f"Failed to install Groq throttling wrapper: {e}")
     
     def is_available(self) -> bool:
         """Check if Groq API is available"""
