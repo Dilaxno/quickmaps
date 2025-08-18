@@ -281,6 +281,100 @@ class PaymentService:
         
         return billing_cycle
     
+    def get_price_id(self, plan_id: str, billing_cycle: str) -> Optional[str]:
+        """Map plan_id and billing_cycle to a Paddle price_id (live)."""
+        price_ids = {
+            'student': {
+                'monthly': 'pri_01k2ad2b99sd168ahwst4dsgsm',
+                'yearly': 'pri_01k2ada78rxk3x2wbe4xbz5n92',
+            },
+            'researcher': {
+                'monthly': 'pri_01k2ad4jq1615arg3wm88pf1t0',
+                'yearly': 'pri_01k2adc42dwrsmg09zg4y2rxjz',
+            },
+            'expert': {
+                'monthly': 'pri_01k2ad68ttbkx581anqh57wm4s',
+                'yearly': 'pri_01k2ade8nh1tta3g336vzwa59x',
+            }
+        }
+        pid = price_ids.get(plan_id, {}).get(billing_cycle)
+        if not pid:
+            logger.warning(f"⚠️ No price_id found for plan_id={plan_id}, billing_cycle={billing_cycle}")
+        return pid
+
+    def create_checkout_session(
+        self,
+        plan_id: str,
+        billing_cycle: str,
+        user_id: str,
+        customer_email: Optional[str] = None,
+        success_url: Optional[str] = None,
+        cancel_url: Optional[str] = None,
+        price_id: Optional[str] = None,
+        quantity: int = 1
+    ) -> Dict[str, Any]:
+        """Create a Paddle Checkout Session. Uses https://api.paddle.com in live mode."""
+        try:
+            if not self.paddle_api_key:
+                logger.warning("⚠️ Paddle API key not configured")
+                return {"success": False, "error": "Paddle API key not configured"}
+
+            headers = {
+                "Authorization": f"Bearer {self.paddle_api_key}",
+                "Content-Type": "application/json"
+            }
+
+            # Determine price_id if not provided
+            if not price_id:
+                price_id = self.get_price_id(plan_id, billing_cycle)
+            if not price_id:
+                return {"success": False, "error": "Unknown plan/billing_cycle mapping to price_id"}
+
+            url = f"{self.paddle_base_url}/checkout/sessions"
+
+            payload: Dict[str, Any] = {
+                "items": [{"price_id": price_id, "quantity": quantity}],
+                "custom_data": {
+                    "userId": user_id,
+                    "planId": plan_id,
+                    "billingPeriod": billing_cycle
+                }
+            }
+
+            if customer_email:
+                payload["customer"] = {"email": customer_email}
+
+            if success_url is None:
+                success_url = os.getenv("PADDLE_SUCCESS_URL")
+            if cancel_url is None:
+                cancel_url = os.getenv("PADDLE_CANCEL_URL")
+            if success_url:
+                payload["success_url"] = success_url
+            if cancel_url:
+                payload["cancel_url"] = cancel_url
+
+            logger.info(f"🧾 Creating Paddle checkout session for user {user_id}, plan {plan_id} ({billing_cycle}) at {url}")
+            response = requests.post(url, headers=headers, json=payload, timeout=30)
+
+            if response.status_code in (200, 201):
+                data = response.json()
+                session = data.get("data", data)
+                checkout_url = session.get("checkout_url") or session.get("redirect_url") or session.get("url")
+                logger.info("✅ Created Paddle checkout session")
+                return {"success": True, "data": session, "checkout_url": checkout_url}
+            else:
+                error_msg = f"Failed to create checkout session: {response.status_code} - {response.text}"
+                logger.error(f"❌ {error_msg}")
+                return {"success": False, "error": error_msg}
+        except requests.exceptions.RequestException as e:
+            error_msg = f"Network error creating checkout session: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return {"success": False, "error": error_msg}
+        except Exception as e:
+            error_msg = f"Error creating checkout session: {str(e)}"
+            logger.error(f"❌ {error_msg}")
+            return {"success": False, "error": error_msg}
+
     async def handle_successful_payment(self, payment_data: Dict[str, Any]) -> PaymentResult:
         """Handle successful payment and update user credits/plan"""
         try:

@@ -315,6 +315,62 @@ class CollaborationService:
         except Exception as e:
             logger.error(f"❌ Error removing collaborator: {e}")
             return {'success': False, 'error': str(e)}
+
+    async def ban_collaborator(self, workspace_id: str, updater_id: str, collaborator_id: str) -> Dict:
+        """Ban a collaborator from a workspace (cannot view or generate)"""
+        try:
+            if not self.db:
+                raise Exception("Database not initialized")
+
+            workspace_ref = self.db.collection('workspaces').document(workspace_id)
+            workspace_doc = workspace_ref.get()
+            if not workspace_doc.exists:
+                raise Exception("Workspace not found")
+
+            workspace_data = workspace_doc.to_dict()
+            updater_role = workspace_data.get('members', {}).get(updater_id, {}).get('role')
+            collaborator_role = workspace_data.get('members', {}).get(collaborator_id, {}).get('role')
+
+            if updater_role not in ['owner', 'admin']:
+                raise Exception("You don't have permission to ban collaborators")
+            if collaborator_role == 'owner':
+                raise Exception("Cannot ban workspace owner")
+
+            workspace_ref.update({
+                f'members.{collaborator_id}.status': 'banned',
+                f'members.{collaborator_id}.banned_at': datetime.utcnow()
+            })
+            logger.info(f"🚫 Banned collaborator {collaborator_id} in workspace {workspace_id}")
+            return { 'success': True, 'message': 'Collaborator banned' }
+        except Exception as e:
+            logger.error(f"❌ Error banning collaborator: {e}")
+            return { 'success': False, 'error': str(e) }
+
+    async def unban_collaborator(self, workspace_id: str, updater_id: str, collaborator_id: str) -> Dict:
+        """Unban a collaborator (restore to active)"""
+        try:
+            if not self.db:
+                raise Exception("Database not initialized")
+
+            workspace_ref = self.db.collection('workspaces').document(workspace_id)
+            workspace_doc = workspace_ref.get()
+            if not workspace_doc.exists:
+                raise Exception("Workspace not found")
+
+            workspace_data = workspace_doc.to_dict()
+            updater_role = workspace_data.get('members', {}).get(updater_id, {}).get('role')
+            if updater_role not in ['owner', 'admin']:
+                raise Exception("You don't have permission to unban collaborators")
+
+            workspace_ref.update({
+                f'members.{collaborator_id}.status': 'active',
+                f'members.{collaborator_id}.updated_at': datetime.utcnow()
+            })
+            logger.info(f"✅ Unbanned collaborator {collaborator_id} in workspace {workspace_id}")
+            return { 'success': True, 'message': 'Collaborator unbanned' }
+        except Exception as e:
+            logger.error(f"❌ Error unbanning collaborator: {e}")
+            return { 'success': False, 'error': str(e) }
     
     async def get_workspace_details(self, workspace_id: str, user_id: str) -> Dict:
         """Get detailed information about a workspace"""
@@ -334,22 +390,38 @@ class CollaborationService:
             if user_id not in workspace_data.get('members', {}):
                 raise Exception("You don't have access to this workspace")
                 
-            # Get user's role
-            user_role = workspace_data.get('members', {}).get(user_id, {}).get('role', 'view')
+            # Get user's role and status
+            member_info = workspace_data.get('members', {}).get(user_id, {})
+            user_role = member_info.get('role', 'view')
+            user_status = member_info.get('status', 'active')
             workspace_data['user_role'] = user_role
+            workspace_data['user_status'] = user_status
             
-            # Get pending invitations (only for owners/admins)
+            # Get invitations (only for owners/admins)
             if user_role in ['owner', 'admin']:
                 invitations_ref = self.db.collection('invitations')
-                query = invitations_ref.where('workspace_id', '==', workspace_id).where('status', '==', 'pending')
-                
+                # Pending invitations
+                pending_query = invitations_ref.where('workspace_id', '==', workspace_id).where('status', '==', 'pending')
                 pending_invitations = []
-                for doc in query.stream():
+                for doc in pending_query.stream():
                     invitation_data = doc.to_dict()
                     invitation_data['id'] = doc.id
                     pending_invitations.append(invitation_data)
-                    
                 workspace_data['pending_invitations'] = pending_invitations
+
+                # All invitations for tracking status in dashboard
+                all_query = invitations_ref.where('workspace_id', '==', workspace_id)
+                invitations = []
+                for doc in all_query.stream():
+                    inv = doc.to_dict()
+                    inv['id'] = doc.id
+                    invitations.append(inv)
+                # Sort by created_at desc if available
+                try:
+                    invitations.sort(key=lambda x: x.get('created_at') or datetime.min, reverse=True)
+                except Exception:
+                    pass
+                workspace_data['invitations'] = invitations
             
             return {
                 'success': True,
@@ -373,9 +445,11 @@ class CollaborationService:
                 return False
                 
             workspace_data = workspace_doc.to_dict()
-            user_role = workspace_data.get('members', {}).get(user_id, {}).get('role')
+            member = workspace_data.get('members', {}).get(user_id, {})
+            user_role = member.get('role')
+            user_status = member.get('status', 'active')
             
-            if not user_role:
+            if not user_role or user_status == 'banned':
                 return False
                 
             # Permission mapping

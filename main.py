@@ -66,6 +66,7 @@ from file_utils import file_utils
 from processing_service import processing_service
 from affiliate_recompute_job import start_affiliate_recompute_scheduler, stop_affiliate_recompute_scheduler
 from citations_routes import router as citations_router
+from collaboration_service import collaboration_service
 
 # Setup logging
 logging.basicConfig(level=getattr(logging, LOG_LEVEL), format=LOG_FORMAT)
@@ -108,6 +109,21 @@ class SemanticSearchRequest(BaseModel):
 
 class ExplainRequest(BaseModel):
     phrase: str
+
+class CreateWorkspaceRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+class InviteRequest(BaseModel):
+    email: str
+    role: str
+    workspace_name: Optional[str] = None
+
+class RoleUpdateRequest(BaseModel):
+    role: str
+
+class AcceptInvitationRequest(BaseModel):
+    invitation_token: str
 
 app = FastAPI(title="Quickmaps Backend", version="1.1.0")
 
@@ -343,6 +359,12 @@ logger.info("Processing service initialized")
 
 credit_service.db = db
 logger.info("Credit service initialized with Firestore client")
+# Initialize collaboration service with Firestore client
+try:
+    collaboration_service.set_db(db)
+    logger.info("Collaboration service initialized")
+except Exception as e:
+    logger.error(f"Failed to initialize collaboration service: {e}")
 
 # Add CORS middleware
 # Ensure quickmaps.pro origins are explicitly allowed so browsers receive proper CORS headers
@@ -473,6 +495,210 @@ async def health_check():
 async def options_handler(path: str):
     """Handle preflight OPTIONS requests"""
     return {"message": "OK"}
+
+# ---------------------- Collaboration Endpoints ----------------------
+@app.post("/api/workspaces")
+async def create_workspace_endpoint(req: CreateWorkspaceRequest, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        result = await collaboration_service.create_workspace(owner_id=user_id, name=req.name, description=req.description or "")
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Failed to create workspace'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating workspace: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create workspace")
+
+@app.get("/api/workspaces")
+async def get_user_workspaces_endpoint(request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        result = await collaboration_service.get_user_workspaces(user_id=user_id)
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Failed to fetch workspaces'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting workspaces: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch workspaces")
+
+@app.get("/api/workspaces/{workspace_id}")
+async def get_workspace_details_endpoint(workspace_id: str, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        result = await collaboration_service.get_workspace_details(workspace_id=workspace_id, user_id=user_id)
+        if not result.get('success'):
+            raise HTTPException(status_code=404, detail=result.get('error', 'Workspace not found'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting workspace details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch workspace details")
+
+@app.post("/api/workspaces/{workspace_id}/invite")
+async def invite_collaborator_endpoint(workspace_id: str, req: InviteRequest, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        result = await collaboration_service.invite_collaborator(
+            workspace_id=workspace_id,
+            inviter_id=user_id,
+            email=req.email,
+            role=req.role,
+            workspace_name=req.workspace_name
+        )
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Failed to send invitation'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error inviting collaborator: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send invitation")
+
+@app.post("/api/invitations/accept")
+async def accept_invitation_endpoint(req: AcceptInvitationRequest, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id or not user_email:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        result = await collaboration_service.accept_invitation(user_id=user_id, user_email=user_email, invitation_token=req.invitation_token)
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Failed to accept invitation'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error accepting invitation: {e}")
+        raise HTTPException(status_code=500, detail="Failed to accept invitation")
+
+@app.put("/api/workspaces/{workspace_id}/collaborators/{member_id}/role")
+async def update_collaborator_role_endpoint(workspace_id: str, member_id: str, req: RoleUpdateRequest, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        result = await collaboration_service.update_collaborator_role(workspace_id=workspace_id, updater_id=user_id, collaborator_id=member_id, new_role=req.role)
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Failed to update role'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error updating collaborator role: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update role")
+
+@app.put("/api/workspaces/{workspace_id}/collaborators/{member_id}/ban")
+async def ban_collaborator_endpoint(workspace_id: str, member_id: str, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        result = await collaboration_service.ban_collaborator(workspace_id=workspace_id, updater_id=user_id, collaborator_id=member_id)
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Failed to ban collaborator'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error banning collaborator: {e}")
+        raise HTTPException(status_code=500, detail="Failed to ban collaborator")
+
+@app.put("/api/workspaces/{workspace_id}/collaborators/{member_id}/unban")
+async def unban_collaborator_endpoint(workspace_id: str, member_id: str, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        result = await collaboration_service.unban_collaborator(workspace_id=workspace_id, updater_id=user_id, collaborator_id=member_id)
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Failed to unban collaborator'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error unbanning collaborator: {e}")
+        raise HTTPException(status_code=500, detail="Failed to unban collaborator")
+
+@app.delete("/api/workspaces/{workspace_id}/collaborators/{member_id}")
+async def remove_collaborator_endpoint(workspace_id: str, member_id: str, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        result = await collaboration_service.remove_collaborator(workspace_id=workspace_id, remover_id=user_id, collaborator_id=member_id)
+        if not result.get('success'):
+            raise HTTPException(status_code=400, detail=result.get('error', 'Failed to remove collaborator'))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing collaborator: {e}")
+        raise HTTPException(status_code=500, detail="Failed to remove collaborator")
+
+@app.get("/api/workspaces/{workspace_id}/saved-notes")
+async def get_workspace_saved_notes(workspace_id: str, limit: int = 100, request: Request = None):
+    """Allow workspace members with 'view' or higher to view owner's saved notes."""
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        # Validate membership and get details
+        details = await collaboration_service.get_workspace_details(workspace_id=workspace_id, user_id=user_id)
+        if not details.get('success'):
+            raise HTTPException(status_code=404, detail=details.get('error', 'Workspace not found'))
+        workspace = details.get('workspace') or {}
+        # Permission check
+        has_view = await collaboration_service.check_user_permission(workspace_id=workspace_id, user_id=user_id, required_permission='view')
+        if not has_view:
+            raise HTTPException(status_code=403, detail="You don’t have permission to view this workspace's notes.")
+        owner_id = workspace.get('owner_id')
+        if not owner_id:
+            raise HTTPException(status_code=400, detail="Workspace owner not set")
+        notes = r2_storage.get_user_saved_notes(user_id=owner_id, limit=limit)
+        return {"success": True, "notes": notes, "count": len(notes), "owner_id": owner_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching workspace saved notes: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch saved notes")
+
+@app.get("/api/workspaces/{workspace_id}/bookmarks")
+async def get_workspace_bookmarks(workspace_id: str, limit: int = 100, request: Request = None):
+    """Allow workspace members with 'view' or higher to view owner's bookmarks."""
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        details = await collaboration_service.get_workspace_details(workspace_id=workspace_id, user_id=user_id)
+        if not details.get('success'):
+            raise HTTPException(status_code=404, detail=details.get('error', 'Workspace not found'))
+        workspace = details.get('workspace') or {}
+        has_view = await collaboration_service.check_user_permission(workspace_id=workspace_id, user_id=user_id, required_permission='view')
+        if not has_view:
+            raise HTTPException(status_code=403, detail="You don’t have permission to view this workspace's bookmarks.")
+        owner_id = workspace.get('owner_id')
+        if not owner_id:
+            raise HTTPException(status_code=400, detail="Workspace owner not set")
+        bookmarks = r2_storage.get_user_bookmarks(user_id=owner_id, limit=limit)
+        return {"success": True, "bookmarks": bookmarks, "count": len(bookmarks), "owner_id": owner_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching workspace bookmarks: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch bookmarks")
+# --------------------------------------------------------------------
 
 
 # Basic endpoints

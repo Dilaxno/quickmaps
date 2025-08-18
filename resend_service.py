@@ -32,6 +32,40 @@ class ResendService:
         """Check if Resend service is properly configured"""
         return bool(self.api_key)
 
+    async def send_email(self, to_email: str, subject: str, html_content: str, text_content: Optional[str] = None, tags: Optional[list] = None) -> bool:
+        """
+        Send a generic email via Resend API.
+        to_email: recipient email
+        subject: subject line
+        html_content: HTML body (full or fragment)
+        text_content: optional plain text body
+        tags: optional list of {name, value} for categorization
+        """
+        if not self.is_configured():
+            logger.error("Resend service is not configured")
+            return False
+        try:
+            payload = {
+                "from": f"{self.from_name} <{self.from_email}>",
+                "to": [to_email],
+                "subject": subject,
+                "html": html_content,
+            }
+            if text_content:
+                payload["text"] = text_content
+            if tags:
+                payload["tags"] = tags
+            headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+            response = requests.post(self.api_url, json=payload, headers=headers)
+            if response.status_code == 200:
+                logger.info(f"✅ Email sent to {to_email} with subject '{subject}'")
+                return True
+            logger.error(f"❌ Resend API error (send_email): {response.status_code} - {response.text}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Failed to send email to {to_email}: {e}")
+            return False
+
     # ---------- Shared Branding ----------
     def _wrap_branded_email(self, header_title: str, header_subtitle: Optional[str], inner_html: str, subject_title: Optional[str] = None) -> str:
         """Wraps provided inner HTML content with a shared branded HTML shell.
