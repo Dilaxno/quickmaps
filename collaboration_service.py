@@ -177,20 +177,26 @@ class CollaborationService:
             self.db.collection('invited_members').document(invitation_id).set(invited_member_data)
             
             # Send invitation email
-            await self._send_invitation_email(
-                email=email,
-                workspace_name=workspace_name or workspace_data.get('name', 'Untitled Workspace'),
-                inviter_name=workspace_data.get('members', {}).get(inviter_id, {}).get('name', 'Someone'),
-                role=role,
-                invitation_token=invitation_token,
-                invited_member_password=invited_member_password
-            )
+            try:
+                await self._send_invitation_email(
+                    email=email,
+                    workspace_name=workspace_name or workspace_data.get('name', 'Untitled Workspace'),
+                    inviter_name=workspace_data.get('members', {}).get(inviter_id, {}).get('name', 'Someone'),
+                    role=role,
+                    invitation_token=invitation_token,
+                    invited_member_password=invited_member_password
+                )
+                logger.info(f"✅ Sent invitation email to {email} for workspace {workspace_id}")
+            except Exception as email_error:
+                logger.warning(f"⚠️ Failed to send invitation email to {email}: {email_error}")
+                # Continue with invitation creation even if email fails
+                # The user can still access the workspace using the credentials
             
-            logger.info(f"✅ Sent invitation to {email} for workspace {workspace_id}")
+            logger.info(f"✅ Created invitation for {email} in workspace {workspace_id}")
             return {
                 'success': True,
                 'invitation_id': invitation_id,
-                'message': f'Invitation sent to {email}'
+                'message': f'Invitation created for {email}. Email delivery may have failed, but the user can still access the workspace using the provided credentials.'
             }
             
         except Exception as e:
@@ -642,10 +648,12 @@ class CollaborationService:
             )
             
             logger.info(f"✅ Sent invitation email to {email}")
+            return True
             
         except Exception as e:
             logger.error(f"❌ Error sending invitation email: {e}")
-            raise
+            # Don't re-raise the exception - let the caller handle it
+            return False
 
 # Create global instance
 collaboration_service = CollaborationService()

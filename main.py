@@ -584,9 +584,12 @@ async def get_workspace_details_endpoint(workspace_id: str, request: Request = N
 @app.post("/api/workspaces/{workspace_id}/invite")
 async def invite_collaborator_endpoint(workspace_id: str, req: InviteRequest, request: Request = None):
     try:
+        logger.info(f"🔍 Inviting collaborator: workspace={workspace_id}, email={req.email}, role={req.role}")
         user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
         if not user_id:
             raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        
+        logger.info(f"✅ User authenticated: {user_id}")
         result = await collaboration_service.invite_collaborator(
             workspace_id=workspace_id,
             inviter_id=user_id,
@@ -594,13 +597,19 @@ async def invite_collaborator_endpoint(workspace_id: str, req: InviteRequest, re
             role=req.role,
             workspace_name=req.workspace_name
         )
+        
+        logger.info(f"📧 Invitation result: {result}")
         if not result.get('success'):
             raise HTTPException(status_code=400, detail=result.get('error', 'Failed to send invitation'))
+        
+        logger.info(f"✅ Invitation successful for {req.email}")
         return result
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error inviting collaborator: {e}")
+        logger.error(f"❌ Error inviting collaborator: {e}")
+        import traceback
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         raise HTTPException(status_code=500, detail="Failed to send invitation")
 
 @app.post("/api/invitations/accept")
