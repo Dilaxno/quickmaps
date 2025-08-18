@@ -175,6 +175,10 @@ def _focus_to_filter(focus: str) -> Optional[str]:
         return " OR ".join(_STANDARDS_SITES)
     if f == "docs":
         return " OR ".join(_DOCS_SITES)
+    if f == "trusted":
+        # Combine reputable domains (edu, papers, standards, docs)
+        combined = _EDU_SITES + _PAPER_SITES + _STANDARDS_SITES + _DOCS_SITES
+        return " OR ".join(combined)
     return None
 
 
