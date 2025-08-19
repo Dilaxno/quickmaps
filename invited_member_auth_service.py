@@ -21,6 +21,21 @@ class InvitedMemberAuthService:
     def set_db(self, db_client):
         """Set the Firestore database client"""
         self.db = db_client
+    
+    def _normalize_datetime(self, dt):
+        """Convert any datetime/timestamp to a naive datetime object for consistent comparison"""
+        from datetime import datetime
+        if hasattr(dt, 'replace'):
+            # It's a datetime object, ensure it's naive
+            if dt.tzinfo is not None:
+                return dt.replace(tzinfo=None)
+            return dt
+        elif hasattr(dt, 'timestamp'):
+            # It's a Firestore timestamp, convert to naive datetime
+            return datetime.fromtimestamp(dt.timestamp())
+        else:
+            # Unknown type, return as is (will cause error later if used in comparison)
+            return dt
         
     async def get_invited_member_info_from_request(self, request: Request) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
         """
@@ -52,7 +67,10 @@ class InvitedMemberAuthService:
             
             # Check if session is expired
             from datetime import datetime
-            if datetime.utcnow() > session_data['expires_at']:
+            current_time = datetime.utcnow()
+            expires_at = self._normalize_datetime(session_data['expires_at'])
+            
+            if current_time > expires_at:
                 return None, None, None, None
                 
             return (
@@ -82,7 +100,10 @@ class InvitedMemberAuthService:
             
             # Check if session is expired
             from datetime import datetime
-            if datetime.utcnow() > session_data['expires_at']:
+            current_time = datetime.utcnow()
+            expires_at = self._normalize_datetime(session_data['expires_at'])
+            
+            if current_time > expires_at:
                 return False
                 
             # Check if workspace matches

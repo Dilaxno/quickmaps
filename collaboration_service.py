@@ -29,6 +29,20 @@ class CollaborationService:
     def _generate_invited_member_password(self) -> str:
         """Generate a random 6-digit password for invited members"""
         return ''.join(random.choices(string.digits, k=6))
+    
+    def _normalize_datetime(self, dt) -> datetime:
+        """Convert any datetime/timestamp to a naive datetime object for consistent comparison"""
+        if hasattr(dt, 'replace'):
+            # It's a datetime object, ensure it's naive
+            if dt.tzinfo is not None:
+                return dt.replace(tzinfo=None)
+            return dt
+        elif hasattr(dt, 'timestamp'):
+            # It's a Firestore timestamp, convert to naive datetime
+            return datetime.fromtimestamp(dt.timestamp())
+        else:
+            # Unknown type, return as is (will cause error later if used in comparison)
+            return dt
         
     async def create_workspace(self, owner_id: str, name: str, description: str = None) -> Dict:
         """Create a new workspace"""
@@ -85,7 +99,7 @@ class CollaborationService:
             workspaces_ref = self.db.collection('workspaces')
             logger.info(f"🔍 Querying workspaces collection...")
             
-            query = workspaces_ref.where(f'members.{user_id}', '!=', None)
+            query = workspaces_ref.filter(f'members.{user_id}', '!=', None)
             logger.info(f"🔍 Created query for user: {user_id}")
             
             workspaces = []
@@ -211,7 +225,7 @@ class CollaborationService:
                 
             # Find invitation by token
             invitations_ref = self.db.collection('invitations')
-            query = invitations_ref.where('token', '==', invitation_token).where('status', '==', 'pending')
+            query = invitations_ref.filter('token', '==', invitation_token).filter('status', '==', 'pending')
             
             invitation_doc = None
             for doc in query.stream():
@@ -224,7 +238,10 @@ class CollaborationService:
             invitation_data = invitation_doc.to_dict()
             
             # Check if invitation is expired
-            if datetime.utcnow() > invitation_data['expires_at']:
+            current_time = datetime.utcnow()
+            expires_at = self._normalize_datetime(invitation_data['expires_at'])
+            
+            if current_time > expires_at:
                 raise Exception("Invitation has expired")
                 
             # Check if email matches
@@ -411,7 +428,7 @@ class CollaborationService:
             
             # Find invited member by email
             invited_members_ref = self.db.collection('invited_members')
-            query = invited_members_ref.where('email', '==', email).where('status', '==', 'pending')
+            query = invited_members_ref.filter('email', '==', email).filter('status', '==', 'pending')
             
             invited_member_doc = None
             for doc in query.stream():
@@ -424,7 +441,10 @@ class CollaborationService:
             invited_member_data = invited_member_doc.to_dict()
             
             # Check if invitation is expired
-            if datetime.utcnow() > invited_member_data['expires_at']:
+            current_time = datetime.utcnow()
+            expires_at = self._normalize_datetime(invited_member_data['expires_at'])
+            
+            if current_time > expires_at:
                 raise Exception("Invitation has expired")
                 
             # Check password
@@ -486,7 +506,10 @@ class CollaborationService:
             session_data = session_doc.to_dict()
             
             # Check if session is expired
-            if datetime.utcnow() > session_data['expires_at']:
+            current_time = datetime.utcnow()
+            expires_at = self._normalize_datetime(session_data['expires_at'])
+            
+            if current_time > expires_at:
                 raise Exception("Session has expired")
                 
             return {
@@ -527,7 +550,7 @@ class CollaborationService:
             if user_role in ['owner', 'admin']:
                 invitations_ref = self.db.collection('invitations')
                 # Pending invitations
-                pending_query = invitations_ref.where('workspace_id', '==', workspace_id).where('status', '==', 'pending')
+                pending_query = invitations_ref.filter('workspace_id', '==', workspace_id).filter('status', '==', 'pending')
                 pending_invitations = []
                 for doc in pending_query.stream():
                     invitation_data = doc.to_dict()
@@ -536,7 +559,7 @@ class CollaborationService:
                 workspace_data['pending_invitations'] = pending_invitations
 
                 # All invitations for tracking status in dashboard
-                all_query = invitations_ref.where('workspace_id', '==', workspace_id)
+                all_query = invitations_ref.filter('workspace_id', '==', workspace_id)
                 invitations = []
                 for doc in all_query.stream():
                     inv = doc.to_dict()
