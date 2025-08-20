@@ -99,7 +99,7 @@ class CollaborationService:
             workspaces_ref = self.db.collection('workspaces')
             logger.info(f"🔍 Querying workspaces collection...")
             
-            query = workspaces_ref.filter(f'members.{user_id}', '!=', None)
+            query = workspaces_ref.where(f'members.{user_id}', '!=', None)
             logger.info(f"🔍 Created query for user: {user_id}")
             
             workspaces = []
