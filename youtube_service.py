@@ -85,6 +85,7 @@ class YouTubeService:
             'format': YTDL_FORMAT,
             'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
             'extractaudio': False,
+            'merge_output_format': 'mp4',
             # Anti-bot measures
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
             'referer': referer,
@@ -137,7 +138,10 @@ class YouTubeService:
                 return filename
         except yt_dlp.utils.DownloadError as e:
             error_msg = str(e)
-            if "403" in error_msg or "Forbidden" in error_msg:
+            if "Requested format is not available" in error_msg or "No such format" in error_msg or "requested format" in error_msg.lower():
+                logger.warning(f"Requested format not available, trying fallback for {url}")
+                return YouTubeService._download_with_fallback(url, output_path)
+            elif "403" in error_msg or "Forbidden" in error_msg:
                 # Try with different format as fallback
                 logger.warning(f"403 error encountered, trying fallback format for {url}")
                 return YouTubeService._download_with_fallback(url, output_path)
@@ -183,30 +187,29 @@ class YouTubeService:
         else:
             # YouTube-specific fallback configurations
             fallback_configs = [
-                # Try with audio-only format first (often works when video fails)
                 {
-                    'format': 'bestaudio[ext=m4a]/bestaudio/best',
+                    'format': 'bv*[height<=1080][vcodec^=avc]+ba/bv*+ba/18/best',
+                    'merge_output_format': 'mp4',
                     'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
                     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                     'sleep_interval': 2,
-                    'retries': 2,
+                    'retries': 3,
                 },
-                # Try with lower quality video
                 {
-                    'format': 'worst[ext=mp4]/worst',
+                    'format': '18/best[ext=mp4]/best',
+                    'merge_output_format': 'mp4',
                     'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
                     'user_agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
                     'sleep_interval': 3,
                     'retries': 2,
                 },
-                # Try with generic format
                 {
-                    'format': 'best',
+                    'format': 'bestaudio[ext=m4a]/bestaudio/best',
                     'outtmpl': os.path.join(output_path, '%(title)s.%(ext)s'),
                     'user_agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-                    'sleep_interval': 5,
-                    'retries': 1,
-                }
+                    'sleep_interval': 4,
+                    'retries': 2,
+                },
             ]
         
         for i, config in enumerate(fallback_configs):
