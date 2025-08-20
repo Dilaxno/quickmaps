@@ -568,13 +568,40 @@ async def get_user_workspaces_endpoint(request: Request = None):
 @app.get("/api/workspaces/{workspace_id}")
 async def get_workspace_details_endpoint(workspace_id: str, request: Request = None):
     try:
+        # Try Firebase user first
         user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Please sign in to continue.")
-        result = await collaboration_service.get_workspace_details(workspace_id=workspace_id, user_id=user_id)
-        if not result.get('success'):
-            raise HTTPException(status_code=404, detail=result.get('error', 'Workspace not found'))
-        return result
+        if user_id:
+            result = await collaboration_service.get_workspace_details(workspace_id=workspace_id, user_id=user_id)
+            if not result.get('success'):
+                raise HTTPException(status_code=404, detail=result.get('error', 'Workspace not found'))
+            return result
+
+        # Fallback to invited member session
+        session_id, invited_email, invited_ws_id, invited_role = await invited_member_auth_service.get_invited_member_info_from_request(request)
+        if session_id and invited_ws_id == workspace_id:
+            # Build a minimal workspace view for invited members (view-only)
+            try:
+                doc = db.collection('workspaces').document(workspace_id).get()
+                if not doc.exists:
+                    raise HTTPException(status_code=404, detail="Workspace not found")
+                w = doc.to_dict() or {}
+                # Remove sensitive membership details for invited views
+                sanitized = {
+                    'id': w.get('id') or workspace_id,
+                    'name': w.get('name', 'Untitled Workspace'),
+                    'description': w.get('description', ''),
+                    'owner_id': w.get('owner_id'),
+                    'user_role': invited_role or 'view',
+                    'user_status': 'active',
+                }
+                return { 'success': True, 'workspace': sanitized }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Invited member workspace details error: {e}")
+                raise HTTPException(status_code=500, detail="Failed to fetch workspace details")
+
+        raise HTTPException(status_code=401, detail="Please sign in to continue.")
     except HTTPException:
         raise
     except Exception as e:
@@ -694,20 +721,27 @@ async def remove_collaborator_endpoint(workspace_id: str, member_id: str, reques
 
 @app.get("/api/workspaces/{workspace_id}/saved-notes")
 async def get_workspace_saved_notes(workspace_id: str, limit: int = 100, request: Request = None):
-    """Allow workspace members with 'view' or higher to view owner's saved notes."""
+    """Allow workspace members or invited viewers to view owner's saved notes."""
     try:
         user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Please sign in to continue.")
-        # Validate membership and get details
-        details = await collaboration_service.get_workspace_details(workspace_id=workspace_id, user_id=user_id)
-        if not details.get('success'):
-            raise HTTPException(status_code=404, detail=details.get('error', 'Workspace not found'))
-        workspace = details.get('workspace') or {}
-        # Permission check
-        has_view = await collaboration_service.check_user_permission(workspace_id=workspace_id, user_id=user_id, required_permission='view')
-        if not has_view:
-            raise HTTPException(status_code=403, detail="You don’t have permission to view this workspace's notes.")
+        if user_id:
+            details = await collaboration_service.get_workspace_details(workspace_id=workspace_id, user_id=user_id)
+            if not details.get('success'):
+                raise HTTPException(status_code=404, detail=details.get('error', 'Workspace not found'))
+            workspace = details.get('workspace') or {}
+            has_view = await collaboration_service.check_user_permission(workspace_id=workspace_id, user_id=user_id, required_permission='view')
+            if not has_view:
+                raise HTTPException(status_code=403, detail="You don’t have permission to view this workspace's notes.")
+        else:
+            # Invited member path
+            session_id, invited_email, invited_ws_id, invited_role = await invited_member_auth_service.get_invited_member_info_from_request(request)
+            if not session_id or invited_ws_id != workspace_id:
+                raise HTTPException(status_code=401, detail="Please sign in to continue.")
+            # Fetch workspace for owner id
+            doc = db.collection('workspaces').document(workspace_id).get()
+            if not doc.exists:
+                raise HTTPException(status_code=404, detail="Workspace not found")
+            workspace = doc.to_dict() or {}
         owner_id = workspace.get('owner_id')
         if not owner_id:
             raise HTTPException(status_code=400, detail="Workspace owner not set")
@@ -721,18 +755,25 @@ async def get_workspace_saved_notes(workspace_id: str, limit: int = 100, request
 
 @app.get("/api/workspaces/{workspace_id}/bookmarks")
 async def get_workspace_bookmarks(workspace_id: str, limit: int = 100, request: Request = None):
-    """Allow workspace members with 'view' or higher to view owner's bookmarks."""
+    """Allow workspace members or invited viewers to view owner's bookmarks."""
     try:
         user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Please sign in to continue.")
-        details = await collaboration_service.get_workspace_details(workspace_id=workspace_id, user_id=user_id)
-        if not details.get('success'):
-            raise HTTPException(status_code=404, detail=details.get('error', 'Workspace not found'))
-        workspace = details.get('workspace') or {}
-        has_view = await collaboration_service.check_user_permission(workspace_id=workspace_id, user_id=user_id, required_permission='view')
-        if not has_view:
-            raise HTTPException(status_code=403, detail="You don’t have permission to view this workspace's bookmarks.")
+        if user_id:
+            details = await collaboration_service.get_workspace_details(workspace_id=workspace_id, user_id=user_id)
+            if not details.get('success'):
+                raise HTTPException(status_code=404, detail=details.get('error', 'Workspace not found'))
+            workspace = details.get('workspace') or {}
+            has_view = await collaboration_service.check_user_permission(workspace_id=workspace_id, user_id=user_id, required_permission='view')
+            if not has_view:
+                raise HTTPException(status_code=403, detail="You don’t have permission to view this workspace's bookmarks.")
+        else:
+            session_id, invited_email, invited_ws_id, invited_role = await invited_member_auth_service.get_invited_member_info_from_request(request)
+            if not session_id or invited_ws_id != workspace_id:
+                raise HTTPException(status_code=401, detail="Please sign in to continue.")
+            doc = db.collection('workspaces').document(workspace_id).get()
+            if not doc.exists:
+                raise HTTPException(status_code=404, detail="Workspace not found")
+            workspace = doc.to_dict() or {}
         owner_id = workspace.get('owner_id')
         if not owner_id:
             raise HTTPException(status_code=400, detail="Workspace owner not set")
