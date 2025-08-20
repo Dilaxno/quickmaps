@@ -501,6 +501,67 @@ async def options_handler(path: str):
     """Handle preflight OPTIONS requests"""
     return {"message": "OK"}
 
+# ---------------------- Device Management Endpoints ----------------------
+
+@app.post("/api/device/register")
+async def register_device_endpoint(request: Request):
+    try:
+        # Require auth
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+
+        # Parse body (tolerant of empty/invalid JSON)
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                payload = {}
+        except Exception:
+            payload = {}
+
+        # Extract network and client hints
+        try:
+            xff = request.headers.get("x-forwarded-for") or request.headers.get("X-Forwarded-For")
+            client_ip = (xff.split(",")[0].strip() if xff else (request.client.host if request.client else "Unknown"))
+        except Exception:
+            client_ip = "Unknown"
+        user_agent = request.headers.get("user-agent", "")
+
+        # Build device request data for fingerprinting
+        req_data = dict(payload or {})
+        req_data.update({
+            "ip_address": client_ip,
+            "user_agent": user_agent,
+        })
+
+        is_new, device_info = device_service.register_device(user_id, req_data)
+        if not device_info:
+            raise HTTPException(status_code=500, detail="Failed to register device")
+
+        return {"success": True, "is_new": is_new, "device": device_info}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error registering device: {e}")
+        raise HTTPException(status_code=500, detail="Failed to register device")
+
+@app.delete("/api/device/{device_id}")
+async def delete_device_endpoint(device_id: str, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+
+        success, device = device_service.remove_device(user_id, device_id)
+        if not success:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return {"success": True, "device": device}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error removing device: {e}")
+        raise HTTPException(status_code=500, detail="Failed to remove device")
+
 # ---------------------- Collaboration Endpoints ----------------------
 
 # Invited Member Authentication
