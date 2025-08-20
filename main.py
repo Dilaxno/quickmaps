@@ -487,6 +487,122 @@ for directory in [UPLOAD_DIR, OUTPUT_DIR, TEMP_DIR, STATIC_DIR]:
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+# Notion OAuth endpoints
+@app.get("/auth/notion/url")
+async def get_notion_auth_url(request: Request = None, state: str = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        # Build Notion OAuth URL
+        NOTION_CLIENT_ID = os.getenv('NOTION_CLIENT_ID')
+        NOTION_REDIRECT_URI = os.getenv('NOTION_REDIRECT_URI', 'http://localhost:5173/auth/notion/callback')
+        NOTION_SCOPES = os.getenv('NOTION_SCOPES', 'read,write')
+        if not NOTION_CLIENT_ID:
+            raise HTTPException(status_code=500, detail="Notion is not configured")
+        import urllib.parse as up
+        params = {
+            'client_id': NOTION_CLIENT_ID,
+            'response_type': 'code',
+            'owner': 'user',
+            'redirect_uri': NOTION_REDIRECT_URI,
+            'state': state or 'default',
+        }
+        # Notion scopes are passed in 'scope' param as space-delimited
+        params['scope'] = ' '.join([s.strip() for s in NOTION_SCOPES.replace(',', ' ').split() if s.strip()])
+        auth_url = f"https://api.notion.com/v1/oauth/authorize?{up.urlencode(params)}"
+        return { 'auth_url': auth_url }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating Notion auth URL: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate Notion auth URL")
+
+@app.post("/auth/notion/callback")
+async def notion_callback(request: Request):
+    try:
+        body = await request.json()
+        code = body.get('code')
+        state = body.get('state')
+        if not code:
+            raise HTTPException(status_code=400, detail="Missing code")
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+
+        NOTION_CLIENT_ID = os.getenv('NOTION_CLIENT_ID')
+        NOTION_CLIENT_SECRET = os.getenv('NOTION_CLIENT_SECRET')
+        NOTION_REDIRECT_URI = os.getenv('NOTION_REDIRECT_URI', 'http://localhost:5173/auth/notion/callback')
+        if not (NOTION_CLIENT_ID and NOTION_CLIENT_SECRET):
+            raise HTTPException(status_code=500, detail="Notion is not configured")
+
+        token_url = 'https://api.notion.com/v1/oauth/token'
+        payload = {
+            'grant_type': 'authorization_code',
+            'code': code,
+            'redirect_uri': NOTION_REDIRECT_URI,
+        }
+        auth = (NOTION_CLIENT_ID, NOTION_CLIENT_SECRET)
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(token_url, json=payload, auth=auth, headers={ 'Content-Type': 'application/json' })
+            if resp.status_code != 200:
+                logger.error(f"Notion token exchange failed: {resp.status_code} {resp.text}")
+                raise HTTPException(status_code=400, detail="Notion authorization failed")
+            data = resp.json()
+        # Persist in Firestore or temp store
+        tokens = {
+            'access_token': data.get('access_token'),
+            'bot_id': data.get('bot_id'),
+            'workspace_id': data.get('workspace_id'),
+            'workspace_name': data.get('workspace_name'),
+            'duplicated_template_id': data.get('duplicated_template_id'),
+            'owner': data.get('owner'),
+            'created_at': datetime.now(timezone.utc).isoformat()
+        }
+        try:
+            if db:
+                db.collection('user_integrations').document(user_id).set({ 'notion': tokens }, merge=True)
+        except Exception as de:
+            logger.error(f"Failed to store Notion tokens: {de}")
+        return { 'success': True, 'access_token': tokens.get('access_token') }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error processing Notion callback: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process Notion callback")
+
+@app.get("/auth/notion/status")
+async def notion_status(request: Request):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        if not db:
+            return { 'connected': False }
+        doc = db.collection('user_integrations').document(user_id).get()
+        connected = doc.exists and bool((doc.to_dict() or {}).get('notion', {}).get('access_token'))
+        return { 'connected': connected }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting Notion status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get Notion status")
+
+@app.post("/auth/notion/disconnect")
+async def notion_disconnect(request: Request):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        if db:
+            db.collection('user_integrations').document(user_id).set({ 'notion': {} }, merge=True)
+        return { 'success': True }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error disconnecting Notion: {e}")
+        raise HTTPException(status_code=500, detail="Failed to disconnect Notion")
+
 # Health check endpoint for CORS debugging
 @app.get("/health")
 async def health_check():
