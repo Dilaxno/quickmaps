@@ -421,7 +421,7 @@ class CollaborationService:
                 "session_id": session_id,
                 "workspace_id": matched["workspace_id"],
                 "workspace_name": matched["workspace_name"],
-                "role": matched["role"];
+                "role": matched["role"],
                 "message": "Successfully authenticated as invited member",
             }
         except Exception as e:
