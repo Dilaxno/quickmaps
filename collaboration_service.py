@@ -20,6 +20,7 @@ from typing import Dict, Optional, Any
 
 from firebase_admin import firestore
 from resend_service import resend_service
+from google.cloud.firestore_v1 import FieldFilter
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ class CollaborationService:
     async def get_user_workspaces(self, user_id: str) -> Dict:
         try:
             self._ensure_db()
-            q = self.db.collection("workspaces").where(f"members.{user_id}", "!=", None)
+            q = self.db.collection("workspaces").where(filter=FieldFilter(f"members.{user_id}", "!=", None))
             workspaces = []
             for doc in q.stream():
                 w = doc.to_dict()
@@ -114,7 +115,7 @@ class CollaborationService:
             # Include invitation info for admins/owners
             if w["user_role"] in {"owner", "admin"}:
                 invs = []
-                all_q = self.db.collection("invitations").where("workspace_id", "==", workspace_id)
+                all_q = self.db.collection("invitations").where(filter=FieldFilter("workspace_id", "==", workspace_id))
                 for inv_doc in all_q.stream():
                     inv = inv_doc.to_dict()
                     inv["id"] = inv_doc.id
@@ -207,7 +208,9 @@ class CollaborationService:
     async def accept_invitation(self, user_id: str, user_email: str, invitation_token: str) -> Dict:
         try:
             self._ensure_db()
-            q = self.db.collection("invitations").where("token", "==", invitation_token).where("status", "==", "pending")
+            q = (self.db.collection("invitations")
+                 .where(filter=FieldFilter("token", "==", invitation_token))
+                 .where(filter=FieldFilter("status", "==", "pending")))
             inv_doc = next(iter(q.stream()), None)
             if not inv_doc:
                 return {"success": False, "error": "Invalid or expired invitation"}
@@ -345,7 +348,9 @@ class CollaborationService:
     async def authenticate_invited_member(self, email: str, password: str) -> Dict:
         try:
             self._ensure_db()
-            q = self.db.collection("invited_members").where("email", "==", email).where("status", "==", "pending")
+            q = (self.db.collection("invited_members")
+                 .where(filter=FieldFilter("email", "==", email))
+                 .where(filter=FieldFilter("status", "==", "pending")))
             doc = next(iter(q.stream()), None)
             if not doc:
                 return {"success": False, "error": "Invalid email or invitation not found"}
