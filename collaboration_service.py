@@ -348,37 +348,80 @@ class CollaborationService:
     async def authenticate_invited_member(self, email: str, password: str) -> Dict:
         try:
             self._ensure_db()
-            q = (self.db.collection("invited_members")
-                 .where(filter=FieldFilter("email", "==", email))
-                 .where(filter=FieldFilter("status", "==", "pending")))
-            doc = next(iter(q.stream()), None)
-            if not doc:
-                return {"success": False, "error": "Invalid email or invitation not found"}
-            invited = doc.to_dict()
+            # Normalize inputs
+            email_raw = str(email or "").strip()
+            pw_input = str(password or "").strip()
 
-            if _now() > _normalize_dt(invited["expires_at"]):
+            def fetch_docs_for_email(e: str):
+                return list(
+                    (self.db.collection("invited_members")
+                        .where(filter=FieldFilter("email", "==", e))
+                        .where(filter=FieldFilter("status", "==", "pending"))
+                    ).stream()
+                )
+
+            docs = fetch_docs_for_email(email_raw)
+            if not docs and email_raw.lower() != email_raw:
+                # Try lowercase variant if nothing found (common normalization)
+                docs = fetch_docs_for_email(email_raw.lower())
+
+            if not docs:
+                return {"success": False, "error": "Invalid email or invitation not found"}
+
+            # Collect and filter non-expired invitations
+            now = _now()
+            invited_list = []
+            for d in docs:
+                inv = d.to_dict()
+                inv["__id"] = d.id
+                try:
+                    exp = _normalize_dt(inv.get("expires_at"))
+                except Exception:
+                    exp = None
+                if exp is None or now <= exp:
+                    invited_list.append(inv)
+
+            if not invited_list:
                 return {"success": False, "error": "Invitation has expired"}
-            if invited.get("password") != password:
+
+            # Prefer most recent by created_at
+            def created_at_dt(inv):
+                try:
+                    return _normalize_dt(inv.get("created_at")) or now
+                except Exception:
+                    return now
+
+            invited_list.sort(key=created_at_dt, reverse=True)
+
+            # Match password against any valid pending invite for this email
+            matched = None
+            for inv in invited_list:
+                stored_pw = str(inv.get("password", "")).strip()
+                if stored_pw and stored_pw == pw_input:
+                    matched = inv
+                    break
+
+            if not matched:
                 return {"success": False, "error": "Invalid password"}
 
             session_id = str(uuid.uuid4())
             session = {
                 "id": session_id,
-                "email": email,
-                "workspace_id": invited["workspace_id"],
-                "workspace_name": invited["workspace_name"],
-                "role": invited["role"],
-                "inviter_id": invited.get("inviter_id"),
-                "created_at": _now(),
-                "expires_at": _now() + timedelta(hours=SESSION_TTL_HOURS),
+                "email": email_raw,
+                "workspace_id": matched["workspace_id"],
+                "workspace_name": matched["workspace_name"],
+                "role": matched["role"],
+                "inviter_id": matched.get("inviter_id"),
+                "created_at": now,
+                "expires_at": now + timedelta(hours=SESSION_TTL_HOURS),
             }
             self.db.collection("invited_member_sessions").document(session_id).set(session)
             return {
                 "success": True,
                 "session_id": session_id,
-                "workspace_id": invited["workspace_id"],
-                "workspace_name": invited["workspace_name"],
-                "role": invited["role"],
+                "workspace_id": matched["workspace_id"],
+                "workspace_name": matched["workspace_name"],
+                "role": matched["role"];
                 "message": "Successfully authenticated as invited member",
             }
         except Exception as e:
