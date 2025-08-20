@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional, Any
 
-from firebase_admin import firestore
+from firebase_admin import firestore, auth
 from resend_service import resend_service
 from google.cloud.firestore_v1 import FieldFilter
 
@@ -182,6 +182,37 @@ class CollaborationService:
                 "expires_at": expires_at,
             }
             self.db.collection("invited_members").document(invitation_id).set(invited_member)
+
+            # Provision Firebase Auth user with the generated password
+            firebase_uid = None
+            try:
+                try:
+                    user = auth.get_user_by_email(email)
+                    # Update password to the invited one so the user can sign in with provided credentials
+                    auth.update_user(user.uid, password=invited_password)
+                    firebase_uid = user.uid
+                except auth.UserNotFoundError:
+                    user = auth.create_user(email=email, password=invited_password)
+                    firebase_uid = user.uid
+            except Exception as fae:
+                logger.warning(f"Firebase Auth provisioning failed for {email}: {fae}")
+                firebase_uid = None
+
+            # Mirror credentials in 'invitedmembers' collection for Firebase-based auth flows
+            invitedmembers_doc = {
+                "id": invitation_id,
+                "email": email,
+                "password": invited_password,  # NOTE: consider hashing in production
+                "firebase_uid": firebase_uid,
+                "workspace_id": workspace_id,
+                "workspace_name": inv["workspace_name"],
+                "role": role,
+                "inviter_id": inviter_id,
+                "status": "pending",
+                "created_at": now,
+                "expires_at": expires_at,
+            }
+            self.db.collection("invitedmembers").document(invitation_id).set(invitedmembers_doc)
 
             # Best-effort email
             try:
@@ -354,7 +385,7 @@ class CollaborationService:
 
             def fetch_docs_for_email(e: str):
                 return list(
-                    (self.db.collection("invited_members")
+                    (self.db.collection("invitedmembers")
                         .where(filter=FieldFilter("email", "==", e))
                         .where(filter=FieldFilter("status", "==", "pending"))
                     ).stream()
@@ -364,6 +395,19 @@ class CollaborationService:
             if not docs and email_raw.lower() != email_raw:
                 # Try lowercase variant if nothing found (common normalization)
                 docs = fetch_docs_for_email(email_raw.lower())
+
+            if not docs:
+                # Legacy fallback to old collection name
+                def fetch_docs_legacy(e: str):
+                    return list(
+                        (self.db.collection("invited_members")
+                            .where(filter=FieldFilter("email", "==", e))
+                            .where(filter=FieldFilter("status", "==", "pending"))
+                        ).stream()
+                    )
+                docs = fetch_docs_legacy(email_raw)
+                if not docs and email_raw.lower() != email_raw:
+                    docs = fetch_docs_legacy(email_raw.lower())
 
             if not docs:
                 return {"success": False, "error": "Invalid email or invitation not found"}
