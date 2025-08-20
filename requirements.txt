@@ -1,7 +1,7 @@
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
-yt-dlp>=2025.08.11	
+yt-dlp>=2025.08.20	
 
 # torch and torchaudio only needed for local whisper
 # Keep them for fallback support, or remove if deploying Deepgram-only
