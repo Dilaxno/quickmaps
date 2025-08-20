@@ -86,7 +86,7 @@ class CollaborationService:
     async def get_user_workspaces(self, user_id: str) -> Dict:
         try:
             self._ensure_db()
-            q = self.db.collection("workspaces").filter(f"members.{user_id}", "!=", None)
+            q = self.db.collection("workspaces").where(f"members.{user_id}", "!=", None)
             workspaces = []
             for doc in q.stream():
                 w = doc.to_dict()
@@ -114,7 +114,7 @@ class CollaborationService:
             # Include invitation info for admins/owners
             if w["user_role"] in {"owner", "admin"}:
                 invs = []
-                all_q = self.db.collection("invitations").filter("workspace_id", "==", workspace_id)
+                all_q = self.db.collection("invitations").where("workspace_id", "==", workspace_id)
                 for inv_doc in all_q.stream():
                     inv = inv_doc.to_dict()
                     inv["id"] = inv_doc.id
@@ -207,7 +207,7 @@ class CollaborationService:
     async def accept_invitation(self, user_id: str, user_email: str, invitation_token: str) -> Dict:
         try:
             self._ensure_db()
-            q = self.db.collection("invitations").filter("token", "==", invitation_token).filter("status", "==", "pending")
+            q = self.db.collection("invitations").where("token", "==", invitation_token).where("status", "==", "pending")
             inv_doc = next(iter(q.stream()), None)
             if not inv_doc:
                 return {"success": False, "error": "Invalid or expired invitation"}
@@ -345,7 +345,7 @@ class CollaborationService:
     async def authenticate_invited_member(self, email: str, password: str) -> Dict:
         try:
             self._ensure_db()
-            q = self.db.collection("invited_members").filter("email", "==", email).filter("status", "==", "pending")
+            q = self.db.collection("invited_members").where("email", "==", email).where("status", "==", "pending")
             doc = next(iter(q.stream()), None)
             if not doc:
                 return {"success": False, "error": "Invalid email or invitation not found"}
