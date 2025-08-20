@@ -56,6 +56,9 @@ from video_validation_service import video_validation_service
 from semantic_search_service import semantic_search_service
 from ocr_service import ocr_service
 
+# Email verification OTP endpoints
+from email_verification_service import email_verification_service
+
 # Import new utility services
 from routes import affiliate_routes
 from transcription_service import transcription_service
@@ -786,6 +789,53 @@ async def get_workspace_bookmarks(workspace_id: str, limit: int = 100, request: 
         raise HTTPException(status_code=500, detail="Failed to fetch bookmarks")
 # --------------------------------------------------------------------
 
+
+# Email verification OTP endpoints
+class SendOtpRequest(BaseModel):
+    email: str
+    name: Optional[str] = None
+
+class VerifyOtpRequest(BaseModel):
+    email: str
+    otp: str
+
+@app.post("/api/auth/send-email-otp")
+async def send_email_otp(req: SendOtpRequest):
+    try:
+        email = (req.email or "").strip().lower()
+        if not email:
+            raise HTTPException(status_code=400, detail="Email is required")
+        result = email_verification_service.create_and_send(email=email, name=req.name)
+        if not result.get('success'):
+            err = result.get('error', 'EMAIL_FAILED')
+            status = 429 if err == 'RESEND_COOLDOWN' else 400
+            return JSONResponse(status_code=status, content={"success": False, "error": err, "detail": result.get('message')})
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error sending OTP: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send verification code")
+
+@app.post("/api/auth/verify-email-otp")
+async def verify_email_otp(req: VerifyOtpRequest):
+    try:
+        email = (req.email or "").strip().lower()
+        code = (req.otp or "").strip()
+        if not email or not code:
+            raise HTTPException(status_code=400, detail="Email and code are required")
+        result = email_verification_service.verify(email=email, code=code)
+        if not result.get('success'):
+            err = result.get('error', 'INVALID_CODE')
+            # Invalid attempts -> 400, cooldown-like/attempts -> 429
+            status = 429 if err in ('TOO_MANY_ATTEMPTS',) else 400
+            return JSONResponse(status_code=status, content={"success": False, "error": err, "detail": result.get('message')})
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error verifying OTP: {e}")
+        raise HTTPException(status_code=500, detail="Failed to verify code")
 
 # Basic endpoints
 @app.get("/")

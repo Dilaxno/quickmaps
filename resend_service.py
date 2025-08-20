@@ -230,6 +230,68 @@ Transform your learning with AI-powered notes.
             logger.error(f"❌ Error sending welcome email: {e}")
             return False
 
+    # ---------- Email Verification (OTP) ----------
+    def get_otp_verification_template(self, user_name: str, code: str, expiry_minutes: int) -> str:
+        inner = f"""
+          <p class="greeting">Hi {user_name or 'there'},</p>
+          <div class="message">
+            <p>Use the verification code below to confirm your email address.</p>
+          </div>
+          <div style="text-align:center;margin:16px 0;">
+            <div style="display:inline-block;background:#111827;color:#fff;padding:14px 18px;border-radius:12px;font-weight:800;letter-spacing:3px;font-size:22px;">
+              {code}
+            </div>
+          </div>
+          <div class="message">
+            <p>This code expires in {expiry_minutes} minutes.</p>
+            <p>If you didn’t request this, you can safely ignore this email.</p>
+          </div>
+        """
+        return self._wrap_branded_email(header_title=self.from_name, header_subtitle="Verify your email address", inner_html=inner, subject_title=f"Verify your email • Code {code}")
+
+    def get_otp_verification_text(self, user_name: str, code: str, expiry_minutes: int) -> str:
+        name = user_name or "there"
+        return f"""
+{name}, your {self.from_name} verification code:
+
+Code: {code}
+Expires in: {expiry_minutes} minutes
+
+If you didn’t request this, you can ignore this message.
+"""
+
+    def send_otp_verification_email(self, user_email: str, otp_code: str, user_name: Optional[str] = None, expiry_minutes: int = 10) -> bool:
+        """
+        Send an OTP verification email via Resend.
+        Returns True on success, False otherwise.
+        """
+        try:
+            if not self.is_configured():
+                logger.error("Resend service is not configured")
+                return False
+            name = user_name or (user_email.split('@')[0].title() if user_email else "there")
+            html = self.get_otp_verification_template(name, otp_code, expiry_minutes)
+            text = self.get_otp_verification_text(name, otp_code, expiry_minutes)
+            subject = f"Verify your email — {otp_code} is your code"
+            payload = {
+                "from": f"{self.from_name} <{self.from_email}>",
+                "to": [user_email],
+                "subject": subject,
+                "html": html,
+                "text": text,
+                "tags": [{"name": "category", "value": "email_verification"}],
+            }
+            headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+            response = requests.post(self.api_url, json=payload, headers=headers)
+            if response.status_code == 200:
+                logger.info(f"✅ OTP email sent to {user_email}")
+                return True
+            logger.error(f"❌ Resend API error (otp): {response.status_code} - {response.text}")
+            return False
+        except Exception as e:
+            logger.error(f"❌ Failed to send OTP email to {user_email}: {e}")
+            return False
+
     # ---------- Password Reset Send ----------
     async def send_password_reset_email(self, email: str, reset_token: str) -> bool:
         """
