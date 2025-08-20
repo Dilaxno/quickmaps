@@ -311,7 +311,8 @@ except Exception as e:
 
 # Initialize services with database
 credit_service.db = db
-logger.info("Credit service initialized")
+device_service.db = db
+logger.info("Credit and device services initialized")
 
 # Paddle API Configuration
 PADDLE_API_KEY = os.getenv('PADDLE_API_KEY')
@@ -362,7 +363,8 @@ processing_service.db = db
 logger.info("Processing service initialized")
 
 credit_service.db = db
-logger.info("Credit service initialized with Firestore client")
+device_service.db = db
+logger.info("Credit and device services initialized with Firestore client")
 # Initialize collaboration service with Firestore client
 try:
     collaboration_service.set_db(db)
