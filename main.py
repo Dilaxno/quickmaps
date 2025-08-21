@@ -603,6 +603,68 @@ async def notion_disconnect(request: Request):
         logger.error(f"Error disconnecting Notion: {e}")
         raise HTTPException(status_code=500, detail="Failed to disconnect Notion")
 
+# Create a new Notion page (top-level in workspace)
+@app.post("/api/notion/pages")
+async def create_notion_page(req: dict, request: Request = None):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        if not db:
+            raise HTTPException(status_code=500, detail="Database not available")
+        # Read user's Notion token
+        doc = db.collection('user_integrations').document(user_id).get()
+        if not doc.exists:
+            raise HTTPException(status_code=400, detail="Notion is not connected")
+        notion_data = (doc.to_dict() or {}).get('notion', {})
+        access_token = notion_data.get('access_token')
+        if not access_token:
+            raise HTTPException(status_code=400, detail="Notion is not connected")
+
+        title = (req.get('title') or '').strip() or 'QuickMaps Page'
+        content = (req.get('content') or '').strip()
+
+        payload = {
+            "parent": { "type": "workspace", "workspace": True },
+            "properties": {
+                "title": {
+                    "title": [
+                        { "type": "text", "text": { "content": title } }
+                    ]
+                }
+            }
+        }
+        if content:
+            payload["children"] = [
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {
+                        "rich_text": [
+                            { "type": "text", "text": { "content": content } }
+                        ]
+                    }
+                }
+            ]
+
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Notion-Version": "2022-06-28",
+        }
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post("https://api.notion.com/v1/pages", headers=headers, json=payload)
+        if resp.status_code not in (200, 201):
+            logger.error(f"Notion page create failed: {resp.status_code} {resp.text}")
+            raise HTTPException(status_code=400, detail="Failed to create Notion page")
+        data = resp.json()
+        return { "success": True, "page_id": data.get('id'), "url": data.get('url') }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating Notion page: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create Notion page")
+
 # Health check endpoint for CORS debugging
 @app.get("/health")
 async def health_check():
