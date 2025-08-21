@@ -8,8 +8,9 @@ import os
 import logging
 
 from groq import Groq
-from config import GROQ_API_KEY, GROQ_MODEL
+from config import GROQ_API_KEY, GROQ_MODEL, OUTPUT_DIR
 from transcription_service import transcription_service
+from tts_service import tts_service
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +73,19 @@ async def sira_ask_endpoint(req: SiraAskRequest, request: Request):
             top_p=0.9,
         )
         answer = (response.choices[0].message.content or "").strip()
-        return {"success": True, "answer": answer}
+        # Generate TTS audio using Deepgram Aura 1 via tts_service
+        audio_info = None
+        try:
+            if not tts_service.is_available():
+                tts_service.initialize()
+            audio_info = await tts_service.generate_speech(answer, str(OUTPUT_DIR))
+        except Exception as te:
+            logging.warning(f"Sira TTS generation failed: {te}")
+            audio_info = None
+        audio_url = None
+        if isinstance(audio_info, dict) and audio_info.get("success") and audio_info.get("audio_id"):
+            audio_url = f"/api/tts/audio/{audio_info.get('audio_id')}"
+        return {"success": True, "answer": answer, "audio_url": audio_url}
     except HTTPException:
         raise
     except Exception as e:
@@ -129,10 +142,23 @@ async def sira_ask_audio_endpoint(
         except Exception as ge:
             logger.error(f"Groq call failed: {ge}")
             answer = ""
+        # Generate TTS audio using Deepgram Aura 1 via tts_service
+        audio_info = None
+        try:
+            if not tts_service.is_available():
+                tts_service.initialize()
+            audio_info = await tts_service.generate_speech(answer, str(OUTPUT_DIR))
+        except Exception as te:
+            logger.warning(f"Sira TTS (audio question) generation failed: {te}")
+            audio_info = None
+        audio_url = None
+        if isinstance(audio_info, dict) and audio_info.get("success") and audio_info.get("audio_id"):
+            audio_url = f"/api/tts/audio/{audio_info.get('audio_id')}"
         return JSONResponse(status_code=200, content={
             "success": True,
             "transcript": transcript_text,
             "answer": answer,
+            "audio_url": audio_url,
         }, headers=_cors_headers_for_request(request))
     except Exception as e:
         logger.error(f"Sira ask-audio error: {e}")
