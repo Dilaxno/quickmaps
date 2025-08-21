@@ -61,6 +61,7 @@ from email_verification_service import email_verification_service
 
 # Import new utility services
 from routes import affiliate_routes
+from routes import sira_routes
 from transcription_service import transcription_service
 from youtube_service import youtube_service
 from auth_service import auth_service
@@ -305,7 +306,8 @@ try:
     affiliate_routes.init(db)
     app.include_router(affiliate_routes.router)
     app.include_router(citations_router)
-    logger.info("Affiliate and citations routes mounted")
+    app.include_router(sira_routes.router)
+    logger.info("Affiliate, citations, and Sira routes mounted")
 except Exception as e:
     logger.error(f"Failed to mount affiliate routes: {e}")
 
