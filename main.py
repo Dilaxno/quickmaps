@@ -51,7 +51,6 @@ from timestamp_mapper import timestamp_mapper
 from tts_service import tts_service
 from password_reset_service import password_reset_service
 from diagram_generator import diagram_generator
-from cloud_storage_service import cloud_storage_service
 from video_validation_service import video_validation_service
 from semantic_search_service import semantic_search_service
 from ocr_service import ocr_service
@@ -625,42 +624,129 @@ async def create_notion_page(req: dict, request: Request = None):
 
         title = (req.get('title') or '').strip() or 'QuickMaps Page'
         content = (req.get('content') or '').strip()
+        chunks = req.get('chunks') if isinstance(req.get('chunks'), list) else None
+        content_format = (req.get('content_format') or '').strip().lower() or 'markdown'
+
+        # Helpers to build Notion blocks safely
+        MAX_RT = 1900  # keep under 2000 to be safe
+
+        def split_rich_text(text: str):
+            parts = []
+            s = (text or '')
+            while len(s) > MAX_RT:
+                cut = s.rfind(' ', 0, MAX_RT)
+                if cut < int(MAX_RT * 0.6):
+                    cut = MAX_RT
+                parts.append(s[:cut].strip())
+                s = s[cut:].strip()
+            if s:
+                parts.append(s)
+            # Map to Notion rich_text objects
+            return [
+                {"type": "text", "text": {"content": p}}
+                for p in parts if p is not None
+            ]
+
+        def make_paragraph(text: str):
+            return {
+                "object": "block",
+                "type": "paragraph",
+                "paragraph": {"rich_text": split_rich_text(text)}
+            }
+
+        def make_heading(text: str, level: int):
+            level = max(1, min(3, level))
+            key = f"heading_{level}"
+            return {
+                "object": "block",
+                "type": key,
+                key: {"rich_text": split_rich_text(text)}
+            }
+
+        def make_bullet(text: str):
+            return {
+                "object": "block",
+                "type": "bulleted_list_item",
+                "bulleted_list_item": {"rich_text": split_rich_text(text)}
+            }
+
+        def make_numbered(text: str):
+            return {
+                "object": "block",
+                "type": "numbered_list_item",
+                "numbered_list_item": {"rich_text": split_rich_text(text)}
+            }
+
+        def parse_markdown_lines_to_blocks(lines: list[str]):
+            blocks = []
+            for raw in lines:
+                line = raw or ''
+                if not line.strip():
+                    blocks.append(make_paragraph(""))
+                    continue
+                m_h = re.match(r"^\s*(#{1,3})\s+(.*)$", line)
+                if m_h:
+                    blocks.append(make_heading(m_h.group(2).strip(), len(m_h.group(1))))
+                    continue
+                m_b = re.match(r"^\s*([\-\*\u2022])\s+(.*)$", line)
+                if m_b:
+                    blocks.append(make_bullet(m_b.group(2).strip()))
+                    continue
+                m_n = re.match(r"^\s*\d+[\.)]\s+(.*)$", line)
+                if m_n:
+                    blocks.append(make_numbered(m_n.group(1).strip()))
+                    continue
+                blocks.append(make_paragraph(line))
+            return blocks
+
+        # Build children blocks
+        children = []
+        if chunks and len(chunks) > 0:
+            # Consume provided chunks (already safe-sized by frontend)
+            # Treat empty strings as paragraph breaks
+            children = parse_markdown_lines_to_blocks(chunks)
+        elif content:
+            # Split content into paragraphs and lines, then map
+            paragraphs = re.split(r"\n{2,}", content)
+            lines = []
+            for p in paragraphs:
+                p = p or ''
+                if not p.strip():
+                    lines.append("")
+                    continue
+                for l in p.split("\n"):
+                    l = l.rstrip()
+                    # Normalize bullets a bit
+                    l = re.sub(r"^\s*[\-\*\u2022]\s+", "- ", l)
+                    lines.append(l)
+                lines.append("")  # blank line between paragraphs
+            children = parse_markdown_lines_to_blocks(lines)
 
         payload = {
-            "parent": { "type": "workspace", "workspace": True },
+            "parent": {"type": "workspace", "workspace": True},
             "properties": {
                 "title": {
                     "title": [
-                        { "type": "text", "text": { "content": title } }
+                        {"type": "text", "text": {"content": title}}
                     ]
                 }
             }
         }
-        if content:
-            payload["children"] = [
-                {
-                    "object": "block",
-                    "type": "paragraph",
-                    "paragraph": {
-                        "rich_text": [
-                            { "type": "text", "text": { "content": content } }
-                        ]
-                    }
-                }
-            ]
+        if children:
+            payload["children"] = children
 
         headers = {
             "Authorization": f"Bearer {access_token}",
             "Content-Type": "application/json",
             "Notion-Version": "2022-06-28",
         }
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             resp = await client.post("https://api.notion.com/v1/pages", headers=headers, json=payload)
         if resp.status_code not in (200, 201):
             logger.error(f"Notion page create failed: {resp.status_code} {resp.text}")
             raise HTTPException(status_code=400, detail="Failed to create Notion page")
         data = resp.json()
-        return { "success": True, "page_id": data.get('id'), "url": data.get('url') }
+        return {"success": True, "page_id": data.get('id'), "url": data.get('url')}
     except HTTPException:
         raise
     except Exception as e:
@@ -5941,7 +6027,7 @@ async def get_my_devices(request: Request = None):
         raise HTTPException(status_code=500, detail=f"Failed to retrieve devices: {str(e)}")
 
 # Cloud Storage Authentication Endpoints
-@app.get("/auth/dropbox/url")
+@app.get("/auth/dropbox/url-removed")
 async def get_dropbox_auth_url(request: Request = None, state: str = None):
     """Get Dropbox OAuth authorization URL"""
     try:
@@ -5970,7 +6056,7 @@ async def get_dropbox_auth_url(request: Request = None, state: str = None):
         logger.error(f"❌ Error generating Dropbox auth URL: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to generate auth URL: {str(e)}")
 
-@app.post("/auth/dropbox/callback")
+@app.post("/auth/dropbox/callback-removed")
 async def dropbox_callback(request: Request):
     """Handle Dropbox OAuth callback"""
     try:
