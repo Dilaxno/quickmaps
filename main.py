@@ -604,6 +604,113 @@ async def notion_disconnect(request: Request):
         logger.error(f"Error disconnecting Notion: {e}")
         raise HTTPException(status_code=500, detail="Failed to disconnect Notion")
 
+# ---------------- Obsidian Integration ----------------
+@app.get("/auth/obsidian/status")
+async def obsidian_status(request: Request):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        if not db:
+            return { 'connected': False }
+        doc = db.collection('user_integrations').document(user_id).get()
+        data = (doc.to_dict() or {}).get('obsidian', {}) if doc.exists else {}
+        connected = bool(data.get('vault_name'))
+        return { 'connected': connected, 'config': { 'vault_name': data.get('vault_name'), 'base_folder': data.get('base_folder') } }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting Obsidian status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get Obsidian status")
+
+class ObsidianConnectRequest(BaseModel):
+    vault_name: str
+    base_folder: Optional[str] = None
+
+@app.post("/auth/obsidian/connect")
+async def obsidian_connect(req: ObsidianConnectRequest, request: Request):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        if not db:
+            raise HTTPException(status_code=500, detail="Database not available")
+        cfg = { 'vault_name': (req.vault_name or '').strip(), 'base_folder': (req.base_folder or '').strip() or None }
+        if not cfg['vault_name']:
+            raise HTTPException(status_code=400, detail="Vault name is required")
+        db.collection('user_integrations').document(user_id).set({ 'obsidian': cfg }, merge=True)
+        return { 'success': True }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error connecting Obsidian: {e}")
+        raise HTTPException(status_code=500, detail="Failed to connect Obsidian")
+
+@app.post("/auth/obsidian/disconnect")
+async def obsidian_disconnect(request: Request):
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        if db:
+            db.collection('user_integrations').document(user_id).set({ 'obsidian': {} }, merge=True)
+        return { 'success': True }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error disconnecting Obsidian: {e}")
+        raise HTTPException(status_code=500, detail="Failed to disconnect Obsidian")
+
+@app.post("/api/obsidian/pages")
+async def create_obsidian_note(req: dict, request: Request = None):
+    """Build an obsidian://new URI to create a note in the user's vault.
+    Falls back with markdown if too large for URI schemes.
+    """
+    try:
+        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Please sign in to continue.")
+        if not db:
+            raise HTTPException(status_code=500, detail="Database not available")
+        # Load stored config
+        doc = db.collection('user_integrations').document(user_id).get()
+        data = (doc.to_dict() or {}).get('obsidian', {}) if doc.exists else {}
+        vault = (req.get('vault_name') or data.get('vault_name') or os.getenv('OBSIDIAN_DEFAULT_VAULT_NAME') or '').strip()
+        base_folder = (req.get('base_folder') or data.get('base_folder') or os.getenv('OBSIDIAN_DEFAULT_BASE_FOLDER') or '').strip()
+        if not vault:
+            raise HTTPException(status_code=400, detail="Obsidian is not connected (vault name missing)")
+
+        # Prepare file name and content
+        raw_title = (req.get('title') or '').strip() or 'QuickMaps Note'
+        content = (req.get('content') or '').strip()
+        file_override = (req.get('file') or '').strip()
+
+        # Sanitize filename
+        safe = re.sub(r"[\\/:*?\"<>|]", "-", raw_title).strip()
+        safe = re.sub(r"\s+", " ", safe).strip()
+        filename = file_override or f"{safe}.md"
+        rel_path = f"{base_folder}/{filename}" if base_folder else filename
+
+        # Build obsidian URI
+        try:
+            import urllib.parse as up
+            uri = f"obsidian://new?vault={up.quote(vault)}&file={up.quote(rel_path)}&content={up.quote(content)}"
+        except Exception:
+            # Minimal fallback without encoding (not recommended)
+            uri = f"obsidian://new?vault={vault}&file={rel_path}&content={content}"
+
+        too_large = len(uri) > 1800
+        result = { 'success': True, 'obsidian_uri': (None if too_large else uri), 'too_large_for_uri': too_large, 'filename': rel_path }
+        if too_large:
+            result['markdown'] = content
+            result['message'] = 'Content too large for obsidian:// URI. Use the returned markdown to save into your vault.'
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating Obsidian note: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create Obsidian note")
+
 # Create a new Notion page (top-level in workspace)
 @app.post("/api/notion/pages")
 async def create_notion_page(req: dict, request: Request = None):
