@@ -533,8 +533,14 @@ class CollaborationService:
                 <p><strong>Email:</strong> {email}<br/>
                    <strong>Password:</strong> <span style='font-family: monospace;'>{invited_member_password}</span></p>
               </div>
-              <p><a href='{invitation_link}' style='background:#4F46E5; color:#fff; padding:10px 16px; border-radius:6px; text-decoration:none;'>Accept Invitation</a></p>
-              <p style='color:#666; font-size:12px;'>If the button doesn't work, copy this link into your browser:<br/>{invitation_link}</p>
+              <p>
+                <a href='{invitation_link}' style='background:#4F46E5; color:#fff; padding:10px 16px; border-radius:6px; text-decoration:none; margin-right:8px;'>Accept Invitation</a>
+                <a href='{os.getenv('FRONTEND_URL', 'http://localhost:3000')}/signin?invited=1' style='background:#0EA5E9; color:#fff; padding:10px 16px; border-radius:6px; text-decoration:none;'>Sign in as invited member</a>
+              </p>
+              <p style='color:#666; font-size:12px;'>If the buttons don't work, copy these links into your browser:<br/>
+                Accept: {invitation_link}<br/>
+                Invited Sign In: {os.getenv('FRONTEND_URL', 'http://localhost:3000')}/signin?invited=1
+              </p>
             </div>
             """
             await resend_service.send_email(to_email=email, subject=subject, html_content=html)
