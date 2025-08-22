@@ -3125,50 +3125,26 @@ async def generate_diagram_for_job(
             logger.error(f"❌ Job not found: {job_id}. No notes files found.")
             # List files in output directory for debugging
             try:
-                files = list(OUTPUT_DIR.glob(f"{job_id}*"))
-                logger.info(f"📁 Files found for job {job_id}: {[f.name for f in files]}")
-            except Exception as e:
-                logger.error(f"❌ Error listing files: {e}")
-            raise HTTPException(status_code=404, detail="Job not found or notes not generated yet")
-        
-        # Extract user information
-        user_id, user_email, user_name = await auth_service.get_user_info_from_request(request)
-        logger.info(f"👤 User info: {user_id}, {user_email}")
-        
-        # Check if diagram generator is available
-        if not diagram_generator.is_available():
-            logger.error("❌ Diagram generator not available - Groq API not configured")
-            raise HTTPException(
-                status_code=503, 
-                detail="Diagram generation service is not available. Please check API configuration."
-            )
-        
-        # Validate diagram type - expanded to align with frontend Mermaid types
-        valid_types = [
-            "flowchart",
-            "graph",
-            "sequenceDiagram",
-            "classDiagram",
-            "stateDiagram",
-            "stateDiagram-v2",
-            "erDiagram",
-            "journey",
-            "gantt",
-            "pie",
-            "gitGraph",
-            "timeline",
-            "requirementDiagram",
-            "quadrantChart",
-            "sankey",
-            "mindmap",
-            # legacy/internal aliases kept for backward compatibility
-            "sequence",
-            "process",
-        ]
-        if diagram_type not in valid_types:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"Invalid diagram type. Must be one of: {', '.join(valid_types)}"
-            )
-        
-        # Read notes content (p
+                files = [p.name for p in OUTPUT_DIR.glob(f"{job_id}_*")]
+                logger.info(f"Output files for {job_id}: {files}")
+            except Exception as le:
+                logger.warning(f"Failed to list output files for {job_id}: {le}")
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        # Prefer Markdown notes if available
+        source_path = notes_md_file if notes_md_file.exists() else notes_file
+        try:
+            with open(source_path, "r", encoding="utf-8", errors="ignore") as f:
+                notes_text = f.read()
+        except Exception as re:
+            logger.error(f"Failed reading notes for {job_id} from {source_path}: {re}")
+            raise HTTPException(status_code=500, detail="Failed to read notes for diagram generation")
+
+        # Generate diagram content
+        diagram = diagram_generator.generate_diagram(notes_text, diagram_type=diagram_type)
+        return {"success": True, "diagram": diagram, "job_id": job_id, "type": diagram_type}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating diagram for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate diagram")
